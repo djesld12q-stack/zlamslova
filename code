@@ -991,9 +991,7 @@ public class CPHInline
 
         if (LogFixes) CPH.LogInfo($"\n════ INPUT ════\nUser: {user}\nText: '{rawInput}'");
 
-        // Пасивна перевірка версії коду в репозиторії — не блокує обробку повідомлення,
-        // просто пише в лог (і раз за сесію в чат, якщо announceInChat=true), якщо в
-        // репозиторії з'явилась новіша версія за ту, що зашита в CurrentVersion.
+       
         _ = CheckForNewerVersionAsync(announceInChat: false);
 
         if (string.IsNullOrWhiteSpace(rawInput) || (StopBots && BotNames.Contains(user.ToLowerInvariant()))) return true;

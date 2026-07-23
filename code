@@ -21,10 +21,8 @@ using System.Windows.Input;
 public class CPHInline
 {
     // ==================== ВЕРСІЯ СКРИПТА ====================
-    // Підвищуй це число щоразу, коли вносиш зміни в код і оновлюєш файл
-    // .../main/code у репозиторії. Бот сам порівнює це число з файлом
-    // .../main/version у репозиторії і попереджає, якщо там новіша версія.
-    private const int CurrentVersion = 1;
+
+    private const int CurrentVersion = 2;
 
     private const string RemoteVersionFile = "version";
     private static int? _remoteVersionCache = null;

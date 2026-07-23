@@ -20,6 +20,18 @@ using System.Windows.Input;
 
 public class CPHInline
 {
+    // ==================== ВЕРСІЯ СКРИПТА ====================
+    // Підвищуй це число щоразу, коли вносиш зміни в код і оновлюєш файл
+    // .../main/code у репозиторії. Бот сам порівнює це число з файлом
+    // .../main/version у репозиторії і попереджає, якщо там новіша версія.
+    private const int CurrentVersion = 1;
+
+    private const string RemoteVersionFile = "version";
+    private static int? _remoteVersionCache = null;
+    private static DateTime _remoteVersionCheckedAt = DateTime.MinValue;
+    private const int VersionCheckCacheMinutes = 30;
+    private static bool _versionWarningShownThisSession = false;
+
     private static readonly Dictionary<string, string> Texts = new()
     {
         ["WindowTitle"] = "BotBandera — Налаштування Fixer",
@@ -268,6 +280,83 @@ public class CPHInline
                 StringComparer.OrdinalIgnoreCase);
         }
         catch { return null; }
+    }
+
+    // ==================== ПЕРЕВІРКА ВЕРСІЇ КОДУ В РЕПОЗИТОРІЇ ====================
+    // Порівнює CurrentVersion (зашито в цьому файлі) з числом у файлі
+    // .../main/version у репозиторії. Якщо там більше — це означає, що ти
+    // оновив .../main/code, але ще не вставив нову версію в Streamer.bot.
+    // Не змінює і не перекомпільовує сам код (C# так не вміє) — лише попереджає.
+
+    private async Task<int?> FetchRemoteVersionAsync(bool bustCache = false)
+    {
+        try
+        {
+            string url = bustCache ? RemoteVersionFile + "?_cb=" + DateTime.UtcNow.Ticks : RemoteVersionFile;
+            using var cts = new CancellationTokenSource(10000);
+            using var reqMsg = new HttpRequestMessage(HttpMethod.Get, url);
+            if (bustCache)
+                reqMsg.Headers.CacheControl = new System.Net.Http.Headers.CacheControlHeaderValue { NoCache = true, NoStore = true, MustRevalidate = true };
+
+            var resp = await RemoteListsClient.SendAsync(reqMsg, cts.Token);
+            if (!resp.IsSuccessStatusCode)
+            {
+                if (LogFixes) CPH.LogWarn($"[BotBandera] ⚠️ Перевірка версії: HTTP {(int)resp.StatusCode}");
+                return null;
+            }
+
+            string content = (await resp.Content.ReadAsStringAsync()).Trim();
+            if (int.TryParse(content, out int remoteVersion)) return remoteVersion;
+
+            if (LogFixes) CPH.LogWarn($"[BotBandera] ⚠️ Перевірка версії: некоректний вміст файлу version ('{content}')");
+            return null;
+        }
+        catch (Exception ex)
+        {
+            if (LogFixes) CPH.LogWarn($"[BotBandera] ⚠️ Перевірка версії: {ex.Message}");
+            return null;
+        }
+    }
+
+    private async Task<int?> GetRemoteVersionAsync(bool forceRefresh = false)
+    {
+        if (!forceRefresh &&
+            _remoteVersionCache.HasValue &&
+            (DateTime.UtcNow - _remoteVersionCheckedAt).TotalMinutes < VersionCheckCacheMinutes)
+            return _remoteVersionCache;
+
+        var fetched = await FetchRemoteVersionAsync(forceRefresh);
+        if (fetched.HasValue)
+        {
+            _remoteVersionCache = fetched;
+            _remoteVersionCheckedAt = DateTime.UtcNow;
+        }
+        return _remoteVersionCache;
+    }
+
+    // announceInChat: якщо true і знайдено новішу версію — додатково пише повідомлення в чат
+    // (не лише в лог), максимум раз за сесію, щоб не спамити при кожному тригері.
+    private async Task CheckForNewerVersionAsync(bool announceInChat = false)
+    {
+        var remoteVersion = await GetRemoteVersionAsync();
+        if (!remoteVersion.HasValue) return;
+
+        if (remoteVersion.Value > CurrentVersion)
+        {
+            string warning = $"[BotBandera] ⚠️ У репозиторії доступна новіша версія коду: v{remoteVersion.Value} (у Streamer.bot зараз v{CurrentVersion}). " +
+                              $"Онови файл .../main/code вручну в редакторі C# (Streamer.bot сам код не перекомпільовує).";
+            CPH.LogWarn(warning);
+
+            if (announceInChat && !_versionWarningShownThisSession)
+            {
+                _versionWarningShownThisSession = true;
+                CPH.SendMessage($"🔧 BotBandera: у репозиторії є новіша версія коду (v{remoteVersion.Value} проти v{CurrentVersion} зараз). Потрібно вручну оновити код у Streamer.bot.");
+            }
+        }
+        else if (LogFixes)
+        {
+            CPH.LogInfo($"[BotBandera] ✅ Версія коду актуальна (v{CurrentVersion}, у репозиторії v{remoteVersion.Value})");
+        }
     }
 
     // Локальний (з GUI) список + список з репозиторію, об'єднані в один HashSet.
@@ -876,6 +965,11 @@ public class CPHInline
 
         if (LogFixes) CPH.LogInfo($"\n════ INPUT ════\nUser: {user}\nText: '{rawInput}'");
 
+        // Пасивна перевірка версії коду в репозиторії — не блокує обробку повідомлення,
+        // просто пише в лог (і раз за сесію в чат, якщо announceInChat=true), якщо в
+        // репозиторії з'явилась новіша версія за ту, що зашита в CurrentVersion.
+        _ = CheckForNewerVersionAsync(announceInChat: false);
+
         if (string.IsNullOrWhiteSpace(rawInput) || (StopBots && BotNames.Contains(user.ToLowerInvariant()))) return true;
 
         string msg = rawInput.Trim();
@@ -1272,6 +1366,58 @@ public class CPHInline
         p.Children.Add(remoteCard);
         AddHintBox(p, "💾 Після кожного оновлення (ручного чи фонового) списки автоматично зберігаються у global var Streamer.bot. Після перезапуску скрипта бот одразу користується останніми завантаженими даними (миттєво), а свіжу версію тягне у фоні — без затримки для тригера.");
 
+        // ── Блок перевірки версії коду ──
+        AddSectionTitle(p, "🧬", "Версія коду", "Порівнює версію, зашиту в цьому файлі, з файлом .../main/version у репозиторії");
+        var versionCard = new Border { Background = new SolidColorBrush(BgCard), BorderBrush = new SolidColorBrush(TBorder), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(9), Padding = new Thickness(18, 14, 18, 14), Margin = new Thickness(0, 0, 0, 22) };
+        var versionStack = new StackPanel();
+        var versionStatusText = new TextBlock
+        {
+            Text = _remoteVersionCache.HasValue
+                ? (_remoteVersionCache.Value > CurrentVersion
+                    ? $"⚠️ У репозиторії новіша версія: v{_remoteVersionCache.Value} (тут v{CurrentVersion}) — онови код вручну"
+                    : $"✅ Версія актуальна: v{CurrentVersion} (репозиторій: v{_remoteVersionCache.Value})")
+                : $"ℹ️ Поточна версія в цьому файлі: v{CurrentVersion}. Натисни «Перевірити», щоб звірити з репозиторієм.",
+            FontSize = 12,
+            Foreground = new SolidColorBrush(TextMuted),
+            VerticalAlignment = VerticalAlignment.Center,
+            TextWrapping = TextWrapping.Wrap
+        };
+        var versionCheckRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 0) };
+        var versionCheckBtn = MakeFooterBtn("🔍  Перевірити версію", C_Accent2);
+        versionCheckRow.Children.Add(versionCheckBtn);
+        versionStack.Children.Add(versionStatusText);
+        versionStack.Children.Add(versionCheckRow);
+        versionCheckBtn.Click += async (s, e) =>
+        {
+            versionCheckBtn.IsEnabled = false;
+            versionStatusText.Text = "⏳ Перевіряю версію в репозиторії...";
+            try
+            {
+                var remoteVersion = await GetRemoteVersionAsync(forceRefresh: true);
+                if (!remoteVersion.HasValue)
+                {
+                    versionStatusText.Text = "❌ Не вдалося прочитати файл .../main/version у репозиторії";
+                }
+                else if (remoteVersion.Value > CurrentVersion)
+                {
+                    versionStatusText.Text = $"⚠️ У репозиторії новіша версія: v{remoteVersion.Value} (тут v{CurrentVersion}). Онови код у Streamer.bot вручну — сам скрипт себе не перекомпільовує.";
+                }
+                else if (remoteVersion.Value < CurrentVersion)
+                {
+                    versionStatusText.Text = $"ℹ️ У Streamer.bot версія новіша за репозиторій: v{CurrentVersion} (репозиторій: v{remoteVersion.Value}). Не забудь підняти число у файлі version після наступного оновлення коду.";
+                }
+                else
+                {
+                    versionStatusText.Text = $"✅ Версія актуальна: v{CurrentVersion}, збігається з репозиторієм.";
+                }
+            }
+            catch (Exception ex) { versionStatusText.Text = "❌ Помилка: " + ex.Message; }
+            finally { versionCheckBtn.IsEnabled = true; }
+        };
+        versionCard.Child = versionStack;
+        p.Children.Add(versionCard);
+        AddHintBox(p, "ℹ️ Це лише попередження — сам код не оновлюється автоматично (Streamer.bot компілює C# один раз при збереженні дії, і скрипт не може переписати сам себе). Щоб оновити: онови .../main/code, підвищ число у .../main/version, потім вручну встав новий код у редактор C# в Streamer.bot і натисни Compile/Save.", true);
+
         AddSectionTitle(p, "⚡", "Слова-тригери", "100% виявлення зламу розкладки");
         AddHintBox(p, T("TriggersHint"));
         AddHintBox(p, "📡 Автоматично доповнюється списком з репозиторію: .../main/" + RemoteTriggersFile);
@@ -1375,6 +1521,13 @@ public class CPHInline
         themeBtn.Click += (s, e) => { _isLightTheme = !_isLightTheme; CPH.SetGlobalVar("BotBanderaFixer_UseLightTheme", _isLightTheme, true); themeTitle.Text = _isLightTheme ? "☀️  Зараз активна: Світла тема" : "🌙  Зараз активна: Темна тема"; themeBtn.Content = _isLightTheme ? "🌙  Перемкнути на Темну тему" : "☀️  Перемкнути на Світлу тему"; themeBtn.Background = _isLightTheme ? new SolidColorBrush(Color.FromRgb(80, 40, 160)) : new SolidColorBrush(Color.FromRgb(160, 120, 40)); ApplyTheme(window, contentScroll.Content as StackPanel, header, footer, sidebar, contentScroll, navBtns, getActiveIdx()); };
         themeInner.Children.Add(themeTitle); themeInner.Children.Add(themeSub); themeInner.Children.Add(themeBtn);
         themeCard.Child = themeInner; p.Children.Add(themeCard);
+
+        AddSectionTitle(p, "🧬", "Версія скрипта");
+        var verCard = new Border { Background = new SolidColorBrush(BgCard), BorderBrush = new SolidColorBrush(TBorder), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(10), Padding = new Thickness(20, 16, 20, 16), Margin = new Thickness(0, 0, 0, 18) };
+        var verInner = new StackPanel();
+        verInner.Children.Add(new TextBlock { Text = $"Версія коду в Streamer.bot: v{CurrentVersion}", FontSize = 14, FontWeight = FontWeights.Bold, Foreground = new SolidColorBrush(TextMain), Margin = new Thickness(0, 0, 0, 6) });
+        verInner.Children.Add(new TextBlock { Text = "Перевірку та кнопку оновлення дивись на вкладці «Тригери» → «Версія коду».", FontSize = 11, Foreground = new SolidColorBrush(TextMuted), TextWrapping = TextWrapping.Wrap });
+        verCard.Child = verInner; p.Children.Add(verCard);
     }
 
     private void BuildHistoryContent(StackPanel p)
@@ -1399,7 +1552,7 @@ public class CPHInline
         AddSectionTitle(p, "❤️", "Про скрипт");
         var card = new Border { Background = new LinearGradientBrush(Color.FromArgb(40, 160, 70, 255), Color.FromArgb(20, 70, 170, 255), 90), BorderBrush = new SolidColorBrush(Color.FromArgb(55, 180, 100, 255)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(12), Padding = new Thickness(32, 28, 32, 28), Margin = new Thickness(0, 0, 0, 28) };
         var inner = new StackPanel();
-        inner.Children.Add(new TextBlock { Text = T("AboutTitle"), FontSize = 20, FontWeight = FontWeights.Bold, Foreground = new LinearGradientBrush(Color.FromRgb(255, 180, 255), Color.FromRgb(180, 220, 255), 45), TextAlignment = TextAlignment.Center, Margin = new Thickness(0, 0, 0, 16) });
+        inner.Children.Add(new TextBlock { Text = T("AboutTitle") + $"  ·  v{CurrentVersion}", FontSize = 20, FontWeight = FontWeights.Bold, Foreground = new LinearGradientBrush(Color.FromRgb(255, 180, 255), Color.FromRgb(180, 220, 255), 45), TextAlignment = TextAlignment.Center, Margin = new Thickness(0, 0, 0, 16) });
         inner.Children.Add(new TextBlock { Text = T("AboutText"), FontSize = 14, Foreground = new SolidColorBrush(Color.FromArgb(210, 220, 210, 255)), TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center, Margin = new Thickness(0, 0, 0, 28) });
         foreach (var (icon, label, url) in new[] { ("🔴", "Twitch — sun69wukong", "https://www.twitch.tv/sun69wukong"), ("💳", "Monobank (донат)", "https://send.monobank.ua/jar/9Bqrs6GN1V"), ("🎁", "Donatello", "https://donatello.to/sun69wukong") })
         {

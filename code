@@ -144,7 +144,8 @@ public class CPHInline
     }
 
   
-    private const string RemoteListsRepoUrl = "https://raw.githubusercontent.com/djesld12q-stack/zlamslova/refs/heads/main/";
+    private const string RemoteListsRepoUrl = "https://raw.githubusercontent.com/djesld12q-stack/zlamslova/main/";
+
     private const string RemoteTriggersFile = "slova";
     private const string RemoteProtectedWordsFile = "zlamslowa";
     private const string RemoteSlangFile = "sleng";

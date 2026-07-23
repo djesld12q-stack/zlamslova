@@ -21,7 +21,7 @@ using System.Windows.Input;
 public class CPHInline
 {
  
-    private const int CurrentVersion = 2;
+    private const int CurrentVersion = 3;
 
     private const string RemoteVersionFile = "version";
     private static int? _remoteVersionCache = null;
@@ -163,7 +163,7 @@ public class CPHInline
     private static readonly ConcurrentDictionary<string, DateTime> _remoteListLoadedAt = new();
     private static readonly SemaphoreSlim _remoteListLock = new SemaphoreSlim(1, 1);
 
-    private bool UseRemoteWordLists => CPH.GetGlobalVar<bool>("BotBanderaFixer_UseRemoteWordLists", true);
+    private bool UseRemoteWordLists => true;
 
     private void InvalidateRemoteListCache(string endpoint) => _remoteListLoadedAt[endpoint] = DateTime.MinValue;
 
@@ -859,8 +859,7 @@ public class CPHInline
         CPH.SetGlobalVar("BotBanderaFixer_IgnoreLatinWords", true, true);
         CPH.SetGlobalVar("BotBanderaFixer_StopBots", true, true);
         CPH.SetGlobalVar("BotBanderaFixer_BotNamesToIgnore", "nightbot,moobot,streamelements,streamlabs,wizebot,soundalerts", true);
-        CPH.SetGlobalVar("BotBanderaFixer_UseTwitchEmotesApi", true, true);
-        CPH.SetGlobalVar("BotBanderaFixer_UseRemoteWordLists", true, true);
+        CPH.SetGlobalVar("BotBanderaFixer_UseTwitchEmotesApi", true, true); 
         CPH.SetGlobalVar("BotBanderaFixer_Initialized", true, true);
     }
 
@@ -1355,7 +1354,7 @@ public class CPHInline
         AddSectionTitle(p, "☁️", "Автооновлення з репозиторію", "slova / sleng / zlamslowa / emout — підтягуються з GitHub автоматично (кеш 30 хв); кнопка «Оновити зараз» завжди тягне живі дані, без кешу");
         var remoteCard = new Border { Background = new SolidColorBrush(BgCard), BorderBrush = new SolidColorBrush(TBorder), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(9), Padding = new Thickness(18, 14, 18, 14), Margin = new Thickness(0, 0, 0, 22) };
         var remoteStack = new StackPanel();
-        remoteStack.Children.Add(CreateStyledCheckBox("BotBanderaFixer_UseRemoteWordLists", "Автоматично підтягувати слова, сленг, захищені слова й емоути з репозиторію"));
+        remoteStack.Children.Add(new TextBlock { Text = "✅ Автоматично підтягує слова, сленг, захищені слова й емоути з репозиторію (завжди увімкнено)", FontSize = 12, FontWeight = FontWeights.Bold, Foreground = new SolidColorBrush(TextMain), Margin = new Thickness(0, 0, 0, 4), TextWrapping = TextWrapping.Wrap });
         var remoteStatusRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 0) };
         var remoteStatusText = new TextBlock { Text = BuildRemoteListsStatusText(), FontSize = 12, Foreground = new SolidColorBrush(TextMuted), VerticalAlignment = VerticalAlignment.Center };
         var remoteRefreshBtn = MakeFooterBtn("🔄  Оновити зараз", C_Accent2);

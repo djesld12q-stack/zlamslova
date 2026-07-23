@@ -21,7 +21,7 @@ using System.Windows.Input;
 public class CPHInline
 {
  
-    private const int CurrentVersion = 4;
+    private const int CurrentVersion = 1.0.2;
 
     private const string RemoteVersionFile = "version";
     private static int? _remoteVersionCache = null;
@@ -328,8 +328,6 @@ public class CPHInline
         return _remoteVersionCache;
     }
 
-    // announceInChat: якщо true і знайдено новішу версію — додатково пише повідомлення в чат
-    // (не лише в лог), максимум раз за сесію, щоб не спамити при кожному тригері.
     private async Task CheckForNewerVersionAsync(bool announceInChat = false)
     {
         var remoteVersion = await GetRemoteVersionAsync();
@@ -353,11 +351,7 @@ public class CPHInline
         }
     }
 
-    // ==================== ЗАВАНТАЖЕННЯ АКТУАЛЬНОГО КОДУ З РЕПОЗИТОРІЮ ====================
-    // Тягне сирий текст .../main/code. САМ скрипт не може перекомпілювати себе під час
-    // виконання (Streamer.bot компілює C# лише один раз, при натисканні Compile/Save у
-    // редакторі дії) — тому результат лише копіюється в буфер обміну, а застосовує його
-    // людина: Ctrl+V у редакторі C# дії в Streamer.bot → Compile/Save.
+
     private async Task<string> FetchRemoteCodeAsync(bool bustCache = true)
     {
         try
@@ -879,7 +873,6 @@ public class CPHInline
     private int MaxHistory => int.TryParse(CPH.GetGlobalVar<string>("BotBanderaFixer_MaxHistory", true), out int v) ? Math.Max(1, v) : 100;
     private string CustomHistoryPath => CPH.GetGlobalVar<string>("BotBanderaFixer_CustomHistoryPath", true) ?? "";
     private bool IgnoreRussianMessages => CPH.GetGlobalVar<bool>("BotBanderaFixer_IgnoreRussianMessages", true);
-    // Кастомні рос. літери — вшито в код, більше не редагується через GUI.
     private const string CustomRussianLetters = "ёыэъЁЫЭЪ";
     private bool StopBots => CPH.GetGlobalVar<bool>("BotBanderaFixer_StopBots", true);
     private string BotNamesToIgnore => CPH.GetGlobalVar<string>("BotBanderaFixer_BotNamesToIgnore", true) ?? "";

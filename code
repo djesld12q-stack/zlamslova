@@ -1,0 +1,1431 @@
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net;
+using System.Net.Http;
+using System.Text;
+using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Media;
+using System.Windows.Media.Effects;
+using System.Windows.Threading;
+using System.Diagnostics;
+using System.Windows.Documents;
+using System.Windows.Input;
+
+public class CPHInline
+{
+    private static readonly Dictionary<string, string> Texts = new()
+    {
+        ["WindowTitle"] = "BotBandera — Налаштування Fixer",
+        ["TabCommands"] = "Команди",
+        ["TabTriggers"] = "Тригери",
+        ["TabFilters"] = "Фільтри та емоти",
+        ["TabBehavior"] = "Поведінка",
+        ["TabAdvanced"] = "Додатково",
+        ["TabHistory"] = "Історія",
+        ["TabAbout"] = "Про скрипт ❤️",
+        ["CommandsHint"] = "Приклади: !fix, !kb, !виправ, !бля",
+        ["TriggersHint"] = "Якщо з'являється після конвертації — 100% злам розкладки\nПриклади: привіт,дякую,бля,шалом,фігня,готово,але",
+        ["SlangHint"] = "Приклади: gg, wp, ez, kekw, lol",
+        ["ProtectedWordsHint"] = "Приклади: нікнейми, ігрові терміни, будь-які слова, які виглядають на злам, але насправді ні\nЦі слова повністю ігноруються: ніколи не конвертуються і не рахуються доказом зламу",
+        ["RussianIgnore"] = "Ігнорувати повідомлення з рос. літерами",
+        ["LatinIgnore"] = "Ігнорувати чисто англійські слова",
+        ["PreserveHint"] = "Приклади: LUL, KEKW, Kappa, 301590448\nТекстові назви — додаються напряму як захищені емоути. Числа — це Twitch Emote Set ID (emotes/set), емоути з таких сетів підвантажуються автоматично.\nПотрібно лише для того, чого автопошук ще не знайшов. Анімовані та :emotes: захищаються самі",
+        ["EmojiHint"] = "Залиш порожнім — без емодзі\nПриклади: 🔤 🇺🇦 😂",
+        ["LogFixes"] = "Логувати виправлення в консоль",
+        ["StopBots"] = "Ігнорувати повідомлення від ботів",
+        ["RequireMod"] = "Керування тільки для модераторів",
+        ["SaveHistory"] = "Зберігати історію зламаних фраз",
+        ["MaxHistoryLabel"] = "Макс. кількість записів",
+        ["CustomHistoryPath"] = "Шлях до файлу історії",
+        ["CustomHistoryHint"] = "Повний шлях до файлу\nЗалиш порожнім — стандартний шлях",
+        ["AboutTitle"] = "BotBandera — Fix_Text",
+        ["AboutText"] = "Дякую за користування скриптом!\n\nБуду радий Follow на Twitch ✨\n\nДонат дуже допомагає розвитку 🇺🇦\n\nЗ любов'ю, sun69wukong 💜",
+        ["TwitchEmotesTitle"] = "Захищені емоути",
+        ["TwitchEmotesSub"] = "Twitch Helix + BTTV + FFZ + 7TV — глобальні й канальні емоути з усіх платформ захищаються автоматично",
+        ["TwitchEmotesToggle"] = "Автоматично захищати будь-які емоути (Twitch, BTTV, FFZ, 7TV)",
+        ["NoBrokenFound"] = "🤷 {user}, не знайшов зламаного повідомлення в історії останніх реплік.",
+    };
+    private string T(string key) => Texts.TryGetValue(key, out var text) ? text : key;
+
+    private static readonly Dictionary<char, char> EnToUk = new()
+    {
+        ['q']='й',['w']='ц',['e']='у',['r']='к',['t']='е',['y']='н',['u']='г',['i']='ш',['o']='щ',['p']='з',
+        ['a']='ф',['s']='і',['d']='в',['f']='а',['g']='п',['h']='р',['j']='о',['k']='л',['l']='д',
+        ['z']='я',['x']='ч',['c']='с',['v']='м',['b']='и',['n']='т',['m']='ь',
+        ['Q']='Й',['W']='Ц',['E']='У',['R']='К',['T']='Е',['Y']='Н',['U']='Г',['I']='Ш',['O']='Щ',['P']='З',
+        ['A']='Ф',['S']='І',['D']='В',['F']='А',['G']='П',['H']='Р',['J']='О',['K']='Л',['L']='Д',
+        ['Z']='Я',['X']='Ч',['C']='С',['V']='М',['B']='И',['N']='Т',['M']='Ь',
+        ['[']='х',['{']='Х',[']']='ї',['}']='Ї',[';']='ж',[':']='Ж',['\'']='є',['&']='?',['"']='Є',
+        [',']='б',['<']='Б',['.']='ю',['>']='Ю'
+    };
+
+    private static readonly string DefaultUltraTriggers = "привіт,дякую,бля,пиздець,курва,фігня,шалом,пока,ку,так,ні,добре,якщо,що,це,ти,я,ми,ви,він,вона,воно,вони,бути,мати,робити,сказати,можна,треба,хочу,буде,є,не,і,а,у,на,з,до,по,за,від,про,як,то,щоб,але,бо,чи,коли,де,тут,там,тоді,зараз,завтра,вчора,сьогодні,вже,ще,може,будуть,було,готово,го,гоу,блін,пздц,хах,лол,прикол,мем,спасибі,дяк,ок,окей,йобаний,блядь,дуже,гарно,красиво,супер,клас,топ,норм,хай,гуд,бай,бувай,удачі,щастя,мир,любов,все,всьо,нормально,доброго,ранку,дня,ночі,добрий,вечір,ласкаво,просимо,будь,ласка,лять,сука,нах,хуй,пізд,ібля,їбля,бляд,єбать,йоб,прив,прива,давай,пішов,іди,здарова,здоров,салют,чекай,стоп,допоможи,помоги,розкажи,покажи,зроби";
+
+    private static readonly HttpClient UkrainianClient = new(new HttpClientHandler
+    {
+        AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate
+    })
+    {
+        BaseAddress = new Uri("https://raw.githubusercontent.com/bakustarver/ukr-dictionaries-list-opensource/main/"),
+        Timeout = Timeout.InfiniteTimeSpan
+    };
+
+    static CPHInline()
+    {
+        UkrainianClient.DefaultRequestHeaders.Add("User-Agent", "StreamerBot-UA");
+        UkrainianClient.DefaultRequestHeaders.Add("Accept", "text/plain");
+    }
+
+    
+    private static HashSet<string> _dictionaryCache = null;
+    private static DateTime _dictionaryLoadedAt = DateTime.MinValue;
+    private static readonly SemaphoreSlim _dictLock = new SemaphoreSlim(1, 1);
+    private const int DictionaryCacheHours = 24;
+
+    private async Task<HashSet<string>> GetDictionaryAsync()
+    {
+        if (_dictionaryCache != null && (DateTime.UtcNow - _dictionaryLoadedAt).TotalHours < DictionaryCacheHours)
+            return _dictionaryCache;
+
+        await _dictLock.WaitAsync();
+        try
+        {
+            if (_dictionaryCache != null && (DateTime.UtcNow - _dictionaryLoadedAt).TotalHours < DictionaryCacheHours)
+                return _dictionaryCache;
+
+            if (LogFixes) CPH.LogInfo("[BotBandera] 📥 Завантажую словник...");
+            using var cts = new CancellationTokenSource(15000);
+            var response = await UkrainianClient.GetAsync("ukrainian-words.txt", cts.Token);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                if (LogFixes) CPH.LogWarn($"[BotBandera] ❌ Словник недоступний: {response.StatusCode}");
+                return _dictionaryCache ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            string content = await response.Content.ReadAsStringAsync();
+            var words = new HashSet<string>(
+                content.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries)
+                       .Select(w => w.Trim().ToLowerInvariant())
+                       .Where(w => w.Length >= 2),
+                StringComparer.OrdinalIgnoreCase
+            );
+
+            _dictionaryCache = words;
+            _dictionaryLoadedAt = DateTime.UtcNow;
+            if (LogFixes) CPH.LogInfo($"[BotBandera] ✅ Словник: {words.Count} слів");
+            return words;
+        }
+        catch (Exception ex)
+        {
+            if (LogFixes) CPH.LogError($"[BotBandera] Помилка словника: {ex.Message}");
+            return _dictionaryCache ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        }
+        finally { _dictLock.Release(); }
+    }
+
+  
+    private const string RemoteListsRepoUrl = "https://raw.githubusercontent.com/djesld12q-stack/zlamslova/refs/heads/main/";
+    private const string RemoteTriggersFile = "slova";
+    private const string RemoteProtectedWordsFile = "zlamslowa";
+    private const string RemoteSlangFile = "sleng";
+    private const string RemoteEmotesFile = "emout";
+    private const int RemoteListCacheMinutes = 30;
+
+    private static readonly HttpClient RemoteListsClient = new(new HttpClientHandler
+    {
+        AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate
+    })
+    {
+        BaseAddress = new Uri(RemoteListsRepoUrl),
+        Timeout = TimeSpan.FromSeconds(15)
+    };
+
+    private static readonly ConcurrentDictionary<string, HashSet<string>> _remoteListCache = new();
+    private static readonly ConcurrentDictionary<string, DateTime> _remoteListLoadedAt = new();
+    private static readonly SemaphoreSlim _remoteListLock = new SemaphoreSlim(1, 1);
+
+    private bool UseRemoteWordLists => CPH.GetGlobalVar<bool>("BotBanderaFixer_UseRemoteWordLists", true);
+
+    private void InvalidateRemoteListCache(string endpoint) => _remoteListLoadedAt[endpoint] = DateTime.MinValue;
+
+   
+    private async Task<HashSet<string>> FetchRemoteListAsync(string endpoint, string label, bool bustCache = false)
+    {
+        try
+        {
+            string url = bustCache
+                ? endpoint + (endpoint.Contains("?") ? "&" : "?") + "_cb=" + DateTime.UtcNow.Ticks
+                : endpoint;
+
+            using var cts = new CancellationTokenSource(15000);
+            using var reqMsg = new HttpRequestMessage(HttpMethod.Get, url);
+            if (bustCache)
+            {
+                reqMsg.Headers.CacheControl = new System.Net.Http.Headers.CacheControlHeaderValue { NoCache = true, NoStore = true, MustRevalidate = true };
+                reqMsg.Headers.Pragma.Add(new System.Net.Http.Headers.NameValueHeaderValue("no-cache"));
+            }
+            var resp = await RemoteListsClient.SendAsync(reqMsg, cts.Token);
+            if (!resp.IsSuccessStatusCode)
+            {
+                if (LogFixes) CPH.LogWarn($"[BotBandera] ⚠️ {label}: HTTP {(int)resp.StatusCode}");
+                return null;
+            }
+            string content = await resp.Content.ReadAsStringAsync();
+            var items = new HashSet<string>(
+                content.Split(new[] { '\n', '\r', ',' }, StringSplitOptions.RemoveEmptyEntries)
+                       .Select(w => w.Trim())
+                       .Where(w => w.Length > 0),
+                StringComparer.OrdinalIgnoreCase
+            );
+            if (LogFixes) CPH.LogInfo($"[BotBandera] ✅ {label}: {items.Count} елементів (репозиторій{(bustCache ? ", live" : "")})");
+            return items;
+        }
+        catch (Exception ex)
+        {
+            if (LogFixes) CPH.LogWarn($"[BotBandera] ⚠️ {label}: {ex.Message}");
+            return null;
+        }
+    }
+
+    private async Task<HashSet<string>> GetRemoteListAsync(string endpoint, string label, bool forceRefresh = false)
+    {
+        if (!UseRemoteWordLists) return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        _remoteListCache.TryGetValue(endpoint, out var cached);
+
+       
+        if (cached == null && !forceRefresh)
+        {
+            var persisted = LoadPersistedRemoteListCache(endpoint);
+            if (persisted != null)
+            {
+                _remoteListCache[endpoint] = persisted;
+                _remoteListLoadedAt[endpoint] = DateTime.MinValue;
+                if (LogFixes) CPH.LogInfo($"[BotBandera] 📦 {label}: {persisted.Count} елементів зі збереженої змінної (миттєво)");
+                _ = RefreshRemoteListInBackgroundAsync(endpoint, label);
+                return persisted;
+            }
+        }
+
+        if (!forceRefresh &&
+            cached != null &&
+            _remoteListLoadedAt.TryGetValue(endpoint, out var loadedAt) &&
+            (DateTime.UtcNow - loadedAt).TotalMinutes < RemoteListCacheMinutes)
+            return cached;
+
+        await _remoteListLock.WaitAsync();
+        try
+        {
+            _remoteListCache.TryGetValue(endpoint, out cached);
+            if (!forceRefresh &&
+                cached != null &&
+                _remoteListLoadedAt.TryGetValue(endpoint, out loadedAt) &&
+                (DateTime.UtcNow - loadedAt).TotalMinutes < RemoteListCacheMinutes)
+                return cached;
+
+           
+            var fetched = await FetchRemoteListAsync(endpoint, label, forceRefresh);
+            if (fetched != null)
+            {
+                _remoteListCache[endpoint] = fetched;
+                _remoteListLoadedAt[endpoint] = DateTime.UtcNow;
+                PersistRemoteListCache(endpoint, fetched);
+                return fetched;
+            }
+            return cached ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        }
+        finally { _remoteListLock.Release(); }
+    }
+
+    private async Task RefreshRemoteListInBackgroundAsync(string endpoint, string label)
+    {
+        try { await GetRemoteListAsync(endpoint, label, forceRefresh: true); }
+        catch (Exception ex) { if (LogFixes) CPH.LogWarn($"[BotBandera] ⚠️ Фоновий рефреш «{label}»: {ex.Message}"); }
+    }
+
+    private void PersistRemoteListCache(string endpoint, HashSet<string> items)
+    {
+        try { CPH.SetGlobalVar("BotBanderaFixer_Cache_" + endpoint, string.Join(",", items), true); }
+        catch { }
+    }
+
+    private HashSet<string> LoadPersistedRemoteListCache(string endpoint)
+    {
+        try
+        {
+            string raw = CPH.GetGlobalVar<string>("BotBanderaFixer_Cache_" + endpoint, true);
+            if (string.IsNullOrWhiteSpace(raw)) return null;
+            return new HashSet<string>(
+                raw.Split(',').Select(s => s.Trim()).Where(s => s.Length > 0),
+                StringComparer.OrdinalIgnoreCase);
+        }
+        catch { return null; }
+    }
+
+    // Локальний (з GUI) список + список з репозиторію, об'єднані в один HashSet.
+    private async Task<HashSet<string>> GetUltraTriggersAsync()
+    {
+        var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(UltraTriggersList))
+            foreach (var w in UltraTriggersList.Split(',').Select(s => s.Trim().ToLowerInvariant()).Where(s => s.Length > 0))
+                result.Add(w);
+
+        foreach (var w in await GetRemoteListAsync(RemoteTriggersFile, "Слова-тригери (репозиторій)"))
+            result.Add(w.ToLowerInvariant());
+
+        return result;
+    }
+
+    private async Task<HashSet<string>> GetGamerSlangAsync()
+    {
+        var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(GamerSlangList))
+            foreach (var w in GamerSlangList.Split(',').Select(s => s.Trim().ToLowerInvariant()).Where(s => s.Length > 0))
+                result.Add(w);
+
+        foreach (var w in await GetRemoteListAsync(RemoteSlangFile, "Ігровий сленг (репозиторій)"))
+            result.Add(w.ToLowerInvariant());
+
+        return result;
+    }
+
+    private async Task<HashSet<string>> GetProtectedWordsAsync()
+    {
+        var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var w in ProtectedWordsList.Split(',').Select(s => s.Trim()).Where(s => s.Length > 0))
+            result.Add(w);
+
+        foreach (var w in await GetRemoteListAsync(RemoteProtectedWordsFile, "Захищені слова (репозиторій)"))
+            result.Add(w);
+
+        return result;
+    }
+
+ 
+    private static readonly HttpClient TwitchHelixClient = new(new HttpClientHandler
+    {
+        AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate
+    })
+    {
+        BaseAddress = new Uri("https://api.twitch.tv/helix/chat/"),
+        Timeout = TimeSpan.FromSeconds(15)
+    };
+
+  
+    private static readonly HttpClient BttvClient = new(new HttpClientHandler
+    {
+        AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate
+    })
+    {
+        BaseAddress = new Uri("https://api.betterttv.net/3/"),
+        Timeout = TimeSpan.FromSeconds(15)
+    };
+
+    private static readonly HttpClient FfzClient = new(new HttpClientHandler
+    {
+        AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate
+    })
+    {
+        BaseAddress = new Uri("https://api.frankerfacez.com/v1/"),
+        Timeout = TimeSpan.FromSeconds(15)
+    };
+
+    private static readonly HttpClient SevenTvClient = new(new HttpClientHandler
+    {
+        AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate
+    })
+    {
+        BaseAddress = new Uri("https://7tv.io/v3/"),
+        Timeout = TimeSpan.FromSeconds(15)
+    };
+
+    private static HashSet<string> _emoteNamesCache = null;
+    private static DateTime _emoteNamesLoadedAt = DateTime.MinValue;
+    private static readonly SemaphoreSlim _emoteLock = new SemaphoreSlim(1, 1);
+    private static readonly Regex EmoteNameJsonRegex = new Regex(@"""name""\s*:\s*""((?:[^""\\]|\\.)*)""", RegexOptions.Compiled);
+    private static readonly Regex EmoteCodeJsonRegex = new Regex(@"""code""\s*:\s*""((?:[^""\\]|\\.)*)""", RegexOptions.Compiled);
+
+    private async Task<HashSet<string>> GetAllEmoteNamesAsync(bool forceRefresh = false)
+    {
+        if (!forceRefresh && _emoteNamesCache != null && (DateTime.UtcNow - _emoteNamesLoadedAt).TotalHours < EmoteCacheHours)
+            return _emoteNamesCache;
+
+       
+        if (!forceRefresh && _emoteNamesCache == null)
+        {
+            var persisted = LoadPersistedEmoteNamesCache();
+            if (persisted != null)
+            {
+                _emoteNamesCache = persisted;
+                _emoteNamesLoadedAt = DateTime.MinValue;
+                if (LogFixes) CPH.LogInfo($"[BotBandera] 📦 Емоути: {persisted.Count} зі збереженої змінної (миттєво)");
+                _ = RefreshEmoteNamesInBackgroundAsync();
+                return persisted;
+            }
+        }
+
+        await _emoteLock.WaitAsync();
+        try
+        {
+            if (!forceRefresh && _emoteNamesCache != null && (DateTime.UtcNow - _emoteNamesLoadedAt).TotalHours < EmoteCacheHours)
+                return _emoteNamesCache;
+
+            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            async Task FetchAsync(HttpClient client, string url, string label, Regex fieldRegex, string bearer = null, string clientId = null)
+            {
+                try
+                {
+                    string finalUrl = forceRefresh ? url + (url.Contains("?") ? "&" : "?") + "_cb=" + DateTime.UtcNow.Ticks : url;
+                    using var msg = new HttpRequestMessage(HttpMethod.Get, finalUrl);
+                    if (bearer != null) msg.Headers.Add("Authorization", "Bearer " + bearer);
+                    if (clientId != null) msg.Headers.Add("Client-Id", clientId);
+                    if (forceRefresh)
+                        msg.Headers.CacheControl = new System.Net.Http.Headers.CacheControlHeaderValue { NoCache = true, NoStore = true };
+                    using var cts = new CancellationTokenSource(10000);
+                    var resp = await client.SendAsync(msg, cts.Token);
+                    if (!resp.IsSuccessStatusCode)
+                    {
+                        if (LogFixes) CPH.LogWarn($"[BotBandera] ⚠️ {label}: HTTP {(int)resp.StatusCode}");
+                        return;
+                    }
+                    string body = await resp.Content.ReadAsStringAsync();
+                    int found = 0;
+                    foreach (Match m in fieldRegex.Matches(body))
+                    {
+                        string name = Regex.Unescape(m.Groups[1].Value);
+                       
+                        if (name.Length > 0 && !name.Contains(' '))
+                        {
+                          
+                            lock (names) { if (names.Add(name)) found++; }
+                        }
+                    }
+                    if (LogFixes) CPH.LogInfo($"[BotBandera] ✅ {label}: +{found}");
+                }
+                catch (Exception ex)
+                {
+                    if (LogFixes) CPH.LogWarn($"[BotBandera] ⚠️ {label}: {ex.Message}");
+                }
+            }
+
+            string broadcasterId = null;
+            try { broadcasterId = CPH.TwitchGetBroadcaster()?.UserId; } catch { }
+
+            var tasks = new List<Task>();
+
+         
+            string token = CPH.TwitchOAuthToken;
+            string clientId = CPH.TwitchClientId;
+            if (!string.IsNullOrWhiteSpace(token) && !string.IsNullOrWhiteSpace(clientId))
+            {
+                tasks.Add(FetchAsync(TwitchHelixClient, "emotes/global", "Twitch глобальні", EmoteNameJsonRegex, token, clientId));
+
+                if (!string.IsNullOrWhiteSpace(broadcasterId))
+                {
+                    tasks.Add(FetchAsync(TwitchHelixClient, $"emotes?broadcaster_id={broadcasterId}", "Twitch канальні", EmoteNameJsonRegex, token, clientId));
+                    tasks.Add(FetchAsync(TwitchHelixClient, $"emotes/user?user_id={broadcasterId}", "Twitch користувача", EmoteNameJsonRegex, token, clientId));
+                }
+
+                var setIds = ExtraEmoteSetIds.Split(',').Select(s => s.Trim()).Where(s => s.Length > 0).ToList();
+                foreach (var e in await GetRemoteListAsync(RemoteEmotesFile, "Емоути (репозиторій)", forceRefresh))
+                    if (e.All(char.IsDigit) && !setIds.Contains(e)) setIds.Add(e);
+
+                for (int i = 0; i < setIds.Count; i += 10)
+                {
+                    string q = string.Join("&", setIds.Skip(i).Take(10).Select(id => "emote_set_id=" + Uri.EscapeDataString(id)));
+                    tasks.Add(FetchAsync(TwitchHelixClient, $"emotes/set?{q}", "Twitch emote set", EmoteNameJsonRegex, token, clientId));
+                }
+            }
+            else if (LogFixes) CPH.LogWarn("[BotBandera] ⚠️ Немає Twitch OAuth токена — Twitch Helix емоути пропущено");
+
+           
+            tasks.Add(FetchAsync(BttvClient, "cached/emotes/global", "BTTV глобальні", EmoteCodeJsonRegex));
+            if (!string.IsNullOrWhiteSpace(broadcasterId))
+                tasks.Add(FetchAsync(BttvClient, $"cached/users/twitch/{broadcasterId}", "BTTV канальні", EmoteCodeJsonRegex));
+
+          
+            tasks.Add(FetchAsync(FfzClient, "set/global", "FFZ глобальні", EmoteNameJsonRegex));
+            if (!string.IsNullOrWhiteSpace(broadcasterId))
+                tasks.Add(FetchAsync(FfzClient, $"room/id/{broadcasterId}", "FFZ канальні", EmoteNameJsonRegex));
+
+           
+            tasks.Add(FetchAsync(SevenTvClient, "emote-sets/global", "7TV глобальні", EmoteNameJsonRegex));
+            if (!string.IsNullOrWhiteSpace(broadcasterId))
+                tasks.Add(FetchAsync(SevenTvClient, $"users/twitch/{broadcasterId}", "7TV канальні", EmoteNameJsonRegex));
+
+           await Task.WhenAll(tasks);
+
+            _emoteNamesCache = names;
+            _emoteNamesLoadedAt = DateTime.UtcNow;
+            PersistEmoteNamesCache(names);
+            if (LogFixes) CPH.LogInfo($"[BotBandera] 🎉 Разом емоутів (Twitch+BTTV+FFZ+7TV): {names.Count}");
+            return names;
+        }
+        finally { _emoteLock.Release(); }
+    }
+
+    private async Task RefreshEmoteNamesInBackgroundAsync()
+    {
+        try { await GetAllEmoteNamesAsync(forceRefresh: true); }
+        catch (Exception ex) { if (LogFixes) CPH.LogWarn($"[BotBandera] ⚠️ Фоновий рефреш емоутів: {ex.Message}"); }
+    }
+
+    private void PersistEmoteNamesCache(HashSet<string> names)
+    {
+        try { CPH.SetGlobalVar("BotBanderaFixer_Cache_AllEmoteNames", string.Join(",", names), true); }
+        catch { }
+    }
+
+    private HashSet<string> LoadPersistedEmoteNamesCache()
+    {
+        try
+        {
+            string raw = CPH.GetGlobalVar<string>("BotBanderaFixer_Cache_AllEmoteNames", true);
+            if (string.IsNullOrWhiteSpace(raw)) return null;
+            return new HashSet<string>(
+                raw.Split(',').Select(s => s.Trim()).Where(s => s.Length > 0),
+                StringComparer.OrdinalIgnoreCase);
+        }
+        catch { return null; }
+    }
+
+  
+    private static bool IsUkrainianCyrillic(char c)
+    {
+        return (c >= 'а' && c <= 'я') || (c >= 'А' && c <= 'Я') ||
+               c == 'і' || c == 'І' || c == 'ї' || c == 'Ї' ||
+               c == 'є' || c == 'Є' || c == 'ґ' || c == 'Ґ';
+    }
+
+    private static bool IsAllUkrainianCyrillic(string s)
+        => s.Length > 0 && s.All(IsUkrainianCyrillic);
+
+   
+    private bool IsWordBroken(string converted, HashSet<string> dict, HashSet<string> ultraTriggers)
+    {
+        if (string.IsNullOrEmpty(converted) || converted.Length < 2) return false;
+        string low = converted.ToLowerInvariant();
+
+    
+        if (ultraTriggers.Contains(low)) return true;
+
+       
+        if (dict.Contains(low)) return true;
+
+      
+        if (low.Length >= 2 && low.Length <= 5 && IsAllUkrainianCyrillic(low))
+            return true;
+
+       
+        if (low.Length >= 3)
+        {
+            foreach (var w in dict)
+            {
+                if (w.Length >= low.Length && w.StartsWith(low, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+        }
+
+        
+        if (low.Length >= 4)
+        {
+            foreach (var w in dict)
+            {
+                if (Math.Abs(w.Length - low.Length) > 2) continue;
+                if (LevenshteinDistance(low, w) <= 1) return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static int LevenshteinDistance(string a, string b)
+    {
+        if (a.Length == 0) return b.Length;
+        if (b.Length == 0) return a.Length;
+        if (a.Length > 12 || b.Length > 12) return Math.Abs(a.Length - b.Length) + 1;
+        var d = new int[a.Length + 1, b.Length + 1];
+        for (int i = 0; i <= a.Length; i++) d[i, 0] = i;
+        for (int j = 0; j <= b.Length; j++) d[0, j] = j;
+        for (int i = 1; i <= a.Length; i++)
+            for (int j = 1; j <= b.Length; j++)
+                d[i, j] = Math.Min(Math.Min(d[i - 1, j] + 1, d[i, j - 1] + 1),
+                    d[i - 1, j - 1] + (a[i - 1] == b[j - 1] ? 0 : 1));
+        return d[a.Length, b.Length];
+    }
+
+    
+    private async Task<(bool IsBroken, string FixedText)> IsBrokenAndFixAsync(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return (false, text);
+
+        
+        var preserveRegexTask = GetPreserveRegexAsync();
+        var ultraTriggersTask = GetUltraTriggersAsync();
+        var gamerSlangTask = GetGamerSlangAsync();
+        await Task.WhenAll(preserveRegexTask, ultraTriggersTask, gamerSlangTask);
+
+        var preserveRegex = preserveRegexTask.Result;
+        var ultraTriggers = ultraTriggersTask.Result;
+        var gamerSlang = gamerSlangTask.Result;
+
+        var allMatches = WordRegex.Matches(text).Cast<Match>()
+            .Where(m => !preserveRegex.IsMatch(m.Value))
+            .Select(m => m.Value)
+            .Where(w => w.Length >= 1)
+            .ToList();
+
+        if (allMatches.Count == 0) return (false, text);
+
+        var latinWords = allMatches
+            .Where(w => IsLatinOnly(w))
+            .Select(w => w.ToLowerInvariant())
+            .Where(w => !gamerSlang.Contains(w))
+            .ToList();
+
+        var cyrillicWords = allMatches
+            .Where(w => !IsLatinOnly(w))
+            .Select(w => w.ToLowerInvariant())
+            .Where(w => !gamerSlang.Contains(w))
+            .ToList();
+
+        if (latinWords.Count == 0) return (false, text);
+
+        var convertedLatin = latinWords
+            .Select(w => ConvertEnToUk(w).ToLowerInvariant())
+            .ToList();
+
+        // ── Крок 1: UltraTriggers — точний збіг, без словника ──
+        bool ultraHit = convertedLatin.Any(w => ultraTriggers.Contains(w));
+        if (ultraHit)
+        {
+            if (LogFixes) CPH.LogInfo($"[BotBandera] ⚡ UltraTrigger!");
+            return (true, FixTextPreserve(text, preserveRegex));
+        }
+
+    
+        int shortCyrillicCount = convertedLatin.Count(w =>
+            w.Length >= 2 && w.Length <= 5 && IsAllUkrainianCyrillic(w));
+
+        if (shortCyrillicCount > 0)
+        {
+        
+            bool hasEnglishContext = cyrillicWords.Count > 0
+                ? false  
+                : latinWords.Any(w => IsCommonEnglishWord(w));
+
+            if (!hasEnglishContext)
+            {
+                if (LogFixes) CPH.LogInfo($"[BotBandera] ⚡ ShortWord hit! ({shortCyrillicCount} слів)");
+                return (true, FixTextPreserve(text, preserveRegex));
+            }
+        }
+
+      
+        var dict = await GetDictionaryAsync();
+
+        int ukrConverted = convertedLatin.Count(w => IsWordBroken(w, dict, ultraTriggers));
+        int ukrOriginal  = cyrillicWords.Count(w => dict.Contains(w));
+        int engInDict    = latinWords.Count(w => dict.Contains(w));
+        int totalWords   = latinWords.Count + cyrillicWords.Count;
+
+        if (LogFixes)
+            CPH.LogInfo($"[BotBandera] 📊 total={totalWords}, latin={latinWords.Count}, " +
+                        $"converted=[{string.Join(", ", convertedLatin)}], " +
+                        $"ukrConverted(fuzzy)={ukrConverted}, ukrOriginal={ukrOriginal}, engInDict={engInDict}");
+
+        bool isBroken;
+        int ukrOriginalTotal = ukrOriginal + engInDict;
+
+        if (totalWords == 1)
+        {
+            isBroken = ukrConverted >= 1 && engInDict == 0;
+        }
+        else if (latinWords.Count == totalWords)
+        {
+            // Всі латинські: достатньо 1 fuzzy збігу
+            isBroken = ukrConverted >= 1;
+        }
+        else
+        {
+            
+            isBroken = ukrConverted > ukrOriginalTotal;
+        }
+
+        if (LogFixes) CPH.LogInfo($"[BotBandera] 🔍 isBroken={isBroken}");
+        return isBroken ? (true, FixTextPreserve(text, preserveRegex)) : (false, text);
+    }
+
+    
+    private static readonly HashSet<string> CommonEnglishWords = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "the","be","to","of","and","a","in","that","have","it","for","not","on","with","he","as","you",
+        "do","at","this","but","his","by","from","they","we","say","her","she","or","an","will","my",
+        "one","all","would","there","their","what","so","up","out","if","about","who","get","which",
+        "go","me","when","make","can","like","time","no","just","him","know","take","people","into",
+        "year","your","good","some","could","them","see","other","than","then","now","look","only",
+        "come","its","over","think","also","back","after","use","two","how","our","work","first","well",
+        "way","even","new","want","because","any","these","give","day","most","us","great","between",
+        "need","large","often","hand","high","place","hold","free","real","life","few","north","open",
+        "seem","together","next","white","children","begin","got","walk","example","ease","paper",
+        "always","music","those","both","mark","book","letter","until","mile","river","car","feet",
+        "care","second","enough","plain","girl","usual","young","ready","above","ever","red","list",
+        "though","feel","talk","bird","soon","body","dog","family","direct","pose","leave","song",
+        "measure","door","product","black","short","numeral","class","wind","question","happen",
+        "complete","ship","area","half","rock","order","fire","south","problem","piece","told","knew",
+        "pass","since","top","whole","king","space","heard","best","hour","better","true","during",
+        "hundred","five","remember","step","early","hold","west","ground","interest","reach","fast",
+        "verb","sing","listen","six","table","travel","less","morning","ten","simple","several","vowel",
+        "toward","war","lay","against","pattern","slow","center","love","person","money","serve",
+        "appear","road","map","rain","rule","govern","pull","cold","notice","voice","power","town",
+        "fine","drive","led","cry","dark","machine","note","wait","plan","figure","star","box",
+        "noun","field","rest","correct","able","pound","done","beauty","drive","stood","contain",
+        "front","teach","week","final","gave","green","oh","quick","develop","ocean","warm","free",
+        "minute","strong","special","mind","behind","clear","tail","produce","fact","street","inch",
+        "lot","nothing","course","stay","wheel","full","force","blue","object","decide","surface",
+        "deep","moon","island","foot","system","busy","test","record","boat","common","gold","possible",
+        "plane","age","dry","wonder","laugh","thousand","ago","ran","check","game","shape","miss",
+        "brought","heat","snow","tire","bring","yes","distant","fill","east","paint","language","among"
+    };
+
+    private static bool IsCommonEnglishWord(string word)
+        => CommonEnglishWords.Contains(word.ToLowerInvariant());
+
+  
+    private static readonly ConcurrentDictionary<string, List<string>> UserMessageHistory =
+        new(StringComparer.OrdinalIgnoreCase);
+    private static readonly int MaxHistoryPerUser = 100;
+    private static readonly List<string> BrokenHistory = new();
+    private static readonly string DefaultHistoryPath =
+        System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Scripts", "broken_phrases.txt");
+    private static bool _isLightTheme = false;
+
+    private static readonly Color C_BgDark    = Color.FromRgb(8, 6, 18);
+    private static readonly Color C_BgPanel   = Color.FromRgb(14, 10, 30);
+    private static readonly Color C_BgCard    = Color.FromRgb(20, 14, 42);
+    private static readonly Color C_BgInput   = Color.FromRgb(26, 18, 52);
+    private static readonly Color C_Accent1   = Color.FromRgb(160, 70, 255);
+    private static readonly Color C_Accent2   = Color.FromRgb(70, 170, 255);
+    private static readonly Color C_AccentUa  = Color.FromRgb(255, 215, 0);
+    private static readonly Color C_Border    = Color.FromArgb(60, 160, 80, 255);
+    private static readonly Color C_TextMain  = Color.FromRgb(235, 228, 255);
+    private static readonly Color C_TextMuted = Color.FromArgb(170, 180, 160, 255);
+    private static readonly Color C_Green     = Color.FromRgb(50, 210, 120);
+    private static readonly Color C_Red       = Color.FromRgb(240, 70, 90);
+    private static readonly Color L_BgDark    = Color.FromRgb(245, 243, 255);
+    private static readonly Color L_BgPanel   = Color.FromRgb(250, 248, 255);
+    private static readonly Color L_BgCard    = Color.FromRgb(235, 228, 255);
+    private static readonly Color L_BgInput   = Color.FromRgb(255, 253, 255);
+    private static readonly Color L_Border    = Color.FromArgb(100, 140, 60, 220);
+    private static readonly Color L_TextMain  = Color.FromRgb(30, 10, 60);
+    private static readonly Color L_TextMuted = Color.FromArgb(200, 100, 80, 140);
+    private static readonly Color L_Sidebar   = Color.FromRgb(225, 215, 255);
+
+    private Color BgDark   => _isLightTheme ? L_BgDark   : C_BgDark;
+    private Color BgPanel  => _isLightTheme ? L_BgPanel  : C_BgPanel;
+    private Color BgCard   => _isLightTheme ? L_BgCard   : C_BgCard;
+    private Color BgInput  => _isLightTheme ? L_BgInput  : C_BgInput;
+    private Color TBorder  => _isLightTheme ? L_Border   : C_Border;
+    private Color TextMain => _isLightTheme ? L_TextMain : C_TextMain;
+    private Color TextMuted=> _isLightTheme ? L_TextMuted: C_TextMuted;
+
+    private void InitDefaults()
+    {
+        if (CPH.GetGlobalVar<bool>("BotBanderaFixer_Initialized", true)) return;
+        CPH.SetGlobalVar("BotBanderaFixer_Triggers", "!виправ,!fix,!kb,!бля", true);
+        CPH.SetGlobalVar("BotBanderaFixer_ResponseTemplate", "🔤 {user}, ось виправлено: {fixed}", true);
+        CPH.SetGlobalVar("BotBanderaFixer_ResponseEmoji", "🔤", true);
+        CPH.SetGlobalVar("BotBanderaFixer_LogFixes", true, true);
+        CPH.SetGlobalVar("BotBanderaFixer_UltraTriggers", DefaultUltraTriggers, true);
+        CPH.SetGlobalVar("BotBanderaFixer_GamerSlang", "gg,wp,ez,kekw,lol,rofl,lmao,glhf", true);
+        CPH.SetGlobalVar("BotBanderaFixer_IgnoreLatinWords", true, true);
+        CPH.SetGlobalVar("BotBanderaFixer_StopBots", true, true);
+        CPH.SetGlobalVar("BotBanderaFixer_BotNamesToIgnore", "nightbot,moobot,streamelements,streamlabs,wizebot,soundalerts", true);
+        CPH.SetGlobalVar("BotBanderaFixer_UseTwitchEmotesApi", true, true);
+        CPH.SetGlobalVar("BotBanderaFixer_UseRemoteWordLists", true, true);
+        CPH.SetGlobalVar("BotBanderaFixer_Initialized", true, true);
+    }
+
+    // Regex для розбиття тексту на слова — вшито в код, більше не редагується через GUI.
+    private const string WordRegexPattern = @"\b[a-zA-Zа-яА-ЯіїІЇєиЄґҐ'.\-]+\b";
+    private static readonly Regex WordRegex = new Regex(WordRegexPattern, RegexOptions.Compiled);
+    private string Triggers => CPH.GetGlobalVar<string>("BotBanderaFixer_Triggers", true) ?? "";
+    private string ResponseTemplate => CPH.GetGlobalVar<string>("BotBanderaFixer_ResponseTemplate", true) ?? "";
+    private bool SaveHistory => CPH.GetGlobalVar<bool>("BotBanderaFixer_SaveHistory", true);
+    private int MaxHistory => int.TryParse(CPH.GetGlobalVar<string>("BotBanderaFixer_MaxHistory", true), out int v) ? Math.Max(1, v) : 100;
+    private string CustomHistoryPath => CPH.GetGlobalVar<string>("BotBanderaFixer_CustomHistoryPath", true) ?? "";
+    private bool IgnoreRussianMessages => CPH.GetGlobalVar<bool>("BotBanderaFixer_IgnoreRussianMessages", true);
+    // Кастомні рос. літери — вшито в код, більше не редагується через GUI.
+    private const string CustomRussianLetters = "ёыэъЁЫЭЪ";
+    private bool StopBots => CPH.GetGlobalVar<bool>("BotBanderaFixer_StopBots", true);
+    private string BotNamesToIgnore => CPH.GetGlobalVar<string>("BotBanderaFixer_BotNamesToIgnore", true) ?? "";
+    private bool RequireModForManager => CPH.GetGlobalVar<bool>("BotBanderaFixer_RequireModForManager", true);
+    private string UltraTriggersList => CPH.GetGlobalVar<string>("BotBanderaFixer_UltraTriggers", true) ?? DefaultUltraTriggers;
+    private string GamerSlangList => CPH.GetGlobalVar<string>("BotBanderaFixer_GamerSlang", true) ?? "";
+    private string ProtectedWordsList => CPH.GetGlobalVar<string>("BotBanderaFixer_ProtectedWords", true) ?? "";
+    private string PreserveEmotesList => CPH.GetGlobalVar<string>("BotBanderaFixer_PreserveEmotesList", true) ?? "";
+    private bool IgnoreLatinWords => CPH.GetGlobalVar<bool>("BotBanderaFixer_IgnoreLatinWords", true);
+    private string ResponseEmoji => CPH.GetGlobalVar<string>("BotBanderaFixer_ResponseEmoji", true) ?? "";
+    private bool LogFixes => CPH.GetGlobalVar<bool>("BotBanderaFixer_LogFixes", true);
+    private bool UseTwitchEmotesApi => CPH.GetGlobalVar<bool>("BotBanderaFixer_UseTwitchEmotesApi", true);
+
+    
+    private string ExtraEmoteSetIds => string.Join(",",
+        PreserveEmotesList.Split(',').Select(s => s.Trim()).Where(s => s.Length > 0 && s.All(char.IsDigit)));
+
+    
+    private const int EmoteCacheHours = 6;
+
+    private HashSet<string> BotNames => string.IsNullOrWhiteSpace(BotNamesToIgnore) ? new HashSet<string>() : new HashSet<string>(BotNamesToIgnore.Split(',').Select(n => n.Trim().ToLowerInvariant()).Where(n => n.Length > 0), StringComparer.OrdinalIgnoreCase);
+
+    private async Task<Regex> GetPreserveRegexAsync()
+    {
+        
+        var allNames = new HashSet<string>(
+            PreserveEmotesList.Split(',').Select(e => e.Trim()).Where(e => e.Length > 0 && !e.All(char.IsDigit)),
+            StringComparer.OrdinalIgnoreCase);
+
+        var protectedWordsTask = GetProtectedWordsAsync();
+        var repoEmotesTask = GetRemoteListAsync(RemoteEmotesFile, "Емоути (репозиторій)");
+        var twitchEmotesTask = UseTwitchEmotesApi
+            ? GetAllEmoteNamesAsync()
+            : Task.FromResult(new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+
+        await Task.WhenAll(protectedWordsTask, repoEmotesTask, twitchEmotesTask);
+
+        foreach (var w in protectedWordsTask.Result)
+            allNames.Add(w);
+
+        foreach (var e in repoEmotesTask.Result)
+            if (e.Length > 0 && !e.All(char.IsDigit)) allNames.Add(e);
+
+        foreach (var n in twitchEmotesTask.Result)
+            allNames.Add(n);
+
+        var escaped = allNames.Select(Regex.Escape).ToList();
+    var pattern = escaped.Count > 0
+    ? $@"(?<!\w)({string.Join("|", escaped)})(?!\w)|:\w+:|<a?:\w+:\d+>|https?://\S+|@\w+|#\w+|\d+|\S+@\S+\.\S+"
+    : @":\w+:|<a?:\w+:\d+>|https?://\S+|@\w+|#\w+|\d+|\S+@\S+\.\S+";
+        return new Regex(pattern, RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    }
+
+    private string GetHistoryPath()
+    {
+        string custom = CustomHistoryPath?.Trim() ?? "";
+        return !string.IsNullOrEmpty(custom) ? custom : DefaultHistoryPath;
+    }
+
+    private void AddMessageToHistory(string user, string message)
+    {
+        if (string.IsNullOrWhiteSpace(message)) return;
+        var history = UserMessageHistory.GetOrAdd(user, _ => new List<string>());
+        lock (history) { history.Insert(0, message); if (history.Count > MaxHistoryPerUser) history.RemoveAt(history.Count - 1); }
+    }
+
+   
+    private async Task<string> FindBrokenMessageInHistoryAsync(string user)
+    {
+        if (!UserMessageHistory.TryGetValue(user, out var history))
+        {
+            if (LogFixes) CPH.LogWarn($"[BotBandera] Немає історії для '{user}'");
+            return null;
+        }
+
+        List<string> snapshot;
+        lock (history) { snapshot = history.Take(15).ToList(); }
+
+        if (snapshot.Count == 0)
+        {
+            if (LogFixes) CPH.LogWarn("[BotBandera] Історія порожня");
+            return null;
+        }
+
+        foreach (var candidate in snapshot)
+        {
+            if (string.IsNullOrWhiteSpace(candidate) || candidate.StartsWith("!")) continue;
+
+            var (isBroken, _) = await IsBrokenAndFixAsync(candidate);
+            if (isBroken)
+            {
+                lock (history) { history.Remove(candidate); }
+                return candidate;
+            }
+        }
+
+        if (LogFixes) CPH.LogWarn("[BotBandera] Ламаного не знайдено");
+        return null;
+    }
+
+    public bool Execute()
+    {
+        InitDefaults();
+        CPH.TryGetArg("triggerId", out string triggerId);
+        if (triggerId == "410aa862-165d-437f-a36b-d8855aca5073") { ShowSettingsWindow(); return true; }
+
+        string rawInput = args["rawInput"]?.ToString() ?? "";
+        string user = args["user"]?.ToString() ?? args["userName"]?.ToString() ?? "unknown";
+
+        if (LogFixes) CPH.LogInfo($"\n════ INPUT ════\nUser: {user}\nText: '{rawInput}'");
+
+        if (string.IsNullOrWhiteSpace(rawInput) || (StopBots && BotNames.Contains(user.ToLowerInvariant()))) return true;
+
+        string msg = rawInput.Trim();
+
+      
+        if (!msg.StartsWith("!"))
+        {
+            AddMessageToHistory(user, rawInput);
+            if (LogFixes) CPH.LogInfo("[BotBandera] ➕ Історія");
+            return true;
+        }
+
+        var (matched, inlineText) = TryMatchTrigger(msg);
+        if (matched) _ = HandleTriggerAsync(inlineText, user);
+        return true;
+    }
+
+   
+    private (bool Matched, string InlineText) TryMatchTrigger(string msg)
+    {
+        if (string.IsNullOrWhiteSpace(Triggers)) return (false, null);
+        string msgLower = msg.ToLowerInvariant();
+
+        foreach (string raw in Triggers.Split(',').Select(t => t.Trim().ToLowerInvariant()).Where(t => t.Length > 0))
+        {
+            string normal = raw.StartsWith("!") ? raw : "!" + raw;
+            string broken = ConvertEnToUk(normal);
+
+            if (msgLower == normal || msgLower == broken) return (true, null);
+            if (msgLower.StartsWith(normal + " ")) return (true, msg.Substring(normal.Length + 1).Trim());
+            if (msgLower.StartsWith(broken + " ")) return (true, msg.Substring(broken.Length + 1).Trim());
+        }
+        return (false, null);
+    }
+
+   
+    private async Task HandleTriggerAsync(string inlineText, string user)
+    {
+        try
+        {
+            if (inlineText != null)
+            {
+                await ProcessFixRequestAsync(inlineText, user);
+                return;
+            }
+
+            string found = await FindBrokenMessageInHistoryAsync(user);
+            if (found != null)
+            {
+                await ProcessFixRequestAsync(found, user);
+            }
+            else
+            {
+                if (LogFixes) CPH.LogWarn("[BotBandera] Ламаного повідомлення не знайдено при активації тригера");
+                CPH.SendMessage(T("NoBrokenFound").Replace("{user}", user));
+            }
+        }
+        catch (Exception ex)
+        {
+            if (LogFixes) CPH.LogError($"[BotBandera] Помилка обробки тригера: {ex.Message}");
+        }
+    }
+
+    private async Task ProcessFixRequestAsync(string input, string user)
+    {
+        string original = input.Trim();
+        if (original.Length < 1) return;
+        if (IgnoreRussianMessages && ContainsRussianLetters(original)) return;
+        var (isBroken, fixedText) = await IsBrokenAndFixAsync(original);
+        if (!isBroken)
+        {
+            if (LogFixes) CPH.LogInfo("[BotBandera] Текст не визначено як зламаний розклад");
+            return;
+        }
+        SaveToHistory(original);
+        if (!string.IsNullOrWhiteSpace(ResponseTemplate)) SendResponse(user, fixedText);
+    }
+
+    private bool ContainsRussianLetters(string text) => text.IndexOfAny(CustomRussianLetters.ToCharArray()) >= 0;
+    private bool IsLatinOnly(string word) => word.All(c => (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '-' || c == '.' || c == '\'');
+
+    private string FixTextPreserve(string input, Regex regex)
+    {
+        var sb = new StringBuilder();
+        int pos = 0;
+        foreach (Match m in regex.Matches(input))
+        {
+            sb.Append(ConvertEnToUk(input.Substring(pos, m.Index - pos)));
+            sb.Append(m.Value);
+            pos = m.Index + m.Length;
+        }
+        sb.Append(ConvertEnToUk(input.Substring(pos)));
+        return sb.ToString().Trim();
+    }
+
+    private string ConvertEnToUk(string input)
+    {
+        var sb = new StringBuilder();
+        foreach (char c in input) sb.Append(EnToUk.TryGetValue(c, out char mapped) ? mapped : c);
+        return sb.ToString();
+    }
+
+    private void SendResponse(string user, string fixedText)
+    {
+        string message = ResponseTemplate.Replace("{user}", user).Replace("{fixed}", fixedText);
+        if (!string.IsNullOrWhiteSpace(ResponseEmoji)) message = ResponseEmoji + " " + message;
+        if (LogFixes) CPH.LogInfo($"[BotBandera] ✅ '{fixedText}'");
+        if (message.Length <= 495) CPH.SendMessage(message);
+        else { CPH.SendMessage(message.Substring(0, 495) + "..."); foreach (string part in SplitLong(fixedText)) CPH.SendMessage(part); }
+    }
+
+    private IEnumerable<string> SplitLong(string text) { for (int i = 0; i < text.Length; i += 485) yield return text.Substring(i, Math.Min(485, text.Length - i)); }
+
+    private void SaveToHistory(string phrase)
+    {
+        if (!SaveHistory || MaxHistory <= 0) return;
+        string path = GetHistoryPath();
+        lock (BrokenHistory)
+        {
+            string entry = $"[{DateTime.Now:yyyy-MM-dd HH:mm}] {phrase}";
+            if (BrokenHistory.Contains(entry)) return;
+            BrokenHistory.Insert(0, entry);
+            if (BrokenHistory.Count > MaxHistory) BrokenHistory.RemoveRange(MaxHistory, BrokenHistory.Count - MaxHistory);
+            Task.Run(() => { try { Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path) ?? ""); File.WriteAllLines(path, BrokenHistory, Encoding.UTF8); } catch { } });
+        }
+    }
+
+    // ==================== GUI ====================
+
+    private void ApplyTheme(Window window, StackPanel contentStack, Border header, Border footer, Border sidebar, ScrollViewer contentScroll, List<Border> navBtns, int activeIdx)
+    {
+        bool light = _isLightTheme;
+        window.Background = new SolidColorBrush(BgDark);
+        header.Background = light ? new LinearGradientBrush(Color.FromRgb(230, 220, 255), L_BgDark, 90) : (Brush)new LinearGradientBrush(Color.FromRgb(18, 10, 40), C_BgDark, 90);
+        header.BorderBrush = new SolidColorBrush(TBorder);
+        footer.Background = new SolidColorBrush(light ? Color.FromRgb(235, 230, 255) : Color.FromRgb(10, 7, 22));
+        footer.BorderBrush = new SolidColorBrush(TBorder);
+        sidebar.Background = new SolidColorBrush(light ? L_Sidebar : Color.FromRgb(12, 8, 26));
+        sidebar.BorderBrush = new SolidColorBrush(TBorder);
+        contentScroll.Background = new SolidColorBrush(BgPanel);
+        for (int i = 0; i < navBtns.Count; i++)
+        {
+            var b = navBtns[i]; var sp = b.Child as StackPanel; if (sp == null) continue;
+            var lbl = sp.Children.OfType<TextBlock>().LastOrDefault(); if (lbl == null) continue;
+            if (i == activeIdx) { b.Background = new LinearGradientBrush(light ? Color.FromArgb(255, 180, 140, 255) : Color.FromArgb(255, 80, 30, 160), light ? Color.FromArgb(255, 160, 110, 240) : Color.FromArgb(255, 50, 15, 110), 0); b.BorderBrush = new SolidColorBrush(light ? Color.FromArgb(180, 140, 80, 220) : Color.FromArgb(180, 180, 100, 255)); lbl.Foreground = new SolidColorBrush(light ? L_TextMain : C_TextMain); }
+            else { b.Background = Brushes.Transparent; b.BorderBrush = Brushes.Transparent; lbl.Foreground = new SolidColorBrush(TextMuted); }
+        }
+        ApplyThemeToChildren(contentStack);
+    }
+
+    private void ApplyThemeToChildren(DependencyObject parent)
+    {
+        foreach (var child in LogicalTreeHelper.GetChildren(parent))
+        {
+            if (child is TextBox tb) { tb.Background = new SolidColorBrush(BgInput); tb.Foreground = new SolidColorBrush(TextMain); tb.CaretBrush = new SolidColorBrush(_isLightTheme ? C_Accent1 : C_Accent2); tb.BorderBrush = new SolidColorBrush(_isLightTheme ? Color.FromArgb(120, 140, 60, 220) : Color.FromArgb(65, 140, 60, 220)); }
+            else if (child is CheckBox cb) { cb.Foreground = new SolidColorBrush(TextMain); }
+            else if (child is Border b) { var bgBrush = b.Background as SolidColorBrush; if (bgBrush != null) { var c = bgBrush.Color; if (c == C_BgCard || c == L_BgCard) b.Background = new SolidColorBrush(BgCard); else if (c == C_BgInput || c == L_BgInput) b.Background = new SolidColorBrush(BgInput); else if (c.A < 60 && c.B > 100 && c.G < 100) b.Background = new SolidColorBrush(_isLightTheme ? Color.FromArgb(30, 120, 80, 220) : Color.FromArgb(18, 80, 160, 255)); } b.BorderBrush = new SolidColorBrush(TBorder); }
+            else if (child is TextBlock txtBlock && txtBlock.Foreground is SolidColorBrush sb) { if (sb.Color == C_TextMain || sb.Color == L_TextMain) txtBlock.Foreground = new SolidColorBrush(TextMain); else if (sb.Color == C_TextMuted || sb.Color == L_TextMuted) txtBlock.Foreground = new SolidColorBrush(TextMuted); }
+            if (child is DependencyObject dep) ApplyThemeToChildren(dep);
+        }
+    }
+
+    private void ShowSettingsWindow()
+    {
+        var thread = new Thread(() =>
+        {
+            SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext(Dispatcher.CurrentDispatcher));
+            _isLightTheme = CPH.GetGlobalVar<bool>("BotBanderaFixer_UseLightTheme", true);
+
+            var window = new Window { Title = T("WindowTitle"), Width = 1020, Height = 860, MinWidth = 800, MinHeight = 600, WindowStartupLocation = WindowStartupLocation.CenterScreen, Background = new SolidColorBrush(BgDark), Foreground = new SolidColorBrush(TextMain), FontFamily = new FontFamily("Segoe UI"), ResizeMode = ResizeMode.CanResize };
+            var rootGrid = new Grid();
+            rootGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            rootGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            rootGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            var header = new Border { Background = _isLightTheme ? new LinearGradientBrush(Color.FromRgb(230, 220, 255), L_BgDark, 90) : (Brush)new LinearGradientBrush(Color.FromRgb(18, 10, 40), C_BgDark, 90), Padding = new Thickness(36, 20, 36, 20), BorderThickness = new Thickness(0, 0, 0, 1), BorderBrush = new SolidColorBrush(TBorder) };
+            var headerRow = new StackPanel { Orientation = Orientation.Horizontal };
+            var flagBadge = new Border { Background = new LinearGradientBrush(Color.FromRgb(0, 91, 187), Color.FromRgb(255, 213, 0), 90), CornerRadius = new CornerRadius(8), Width = 44, Height = 44, Margin = new Thickness(0, 0, 16, 0) };
+            flagBadge.Effect = new DropShadowEffect { Color = C_AccentUa, BlurRadius = 16, ShadowDepth = 0, Opacity = 0.7 };
+            flagBadge.Child = new TextBlock { Text = "🇺🇦", FontSize = 22, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+            var headerTextStack = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+            var headerTitle = new TextBlock { Text = "BotBandera Fixer", FontSize = 22, FontWeight = FontWeights.Bold, Foreground = new LinearGradientBrush(C_Accent1, C_Accent2, 0) };
+            headerTitle.Effect = new DropShadowEffect { Color = C_Accent1, BlurRadius = 12, ShadowDepth = 0, Opacity = 0.5 };
+            var headerSub = new TextBlock { Text = "Налаштування виправлення розкладки за тригером", FontSize = 12, Foreground = new SolidColorBrush(TextMuted) };
+            headerTextStack.Children.Add(headerTitle); headerTextStack.Children.Add(headerSub);
+            headerRow.Children.Add(flagBadge); headerRow.Children.Add(headerTextStack);
+            header.Child = headerRow; Grid.SetRow(header, 0);
+
+            var bodyGrid = new Grid();
+            bodyGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(195) });
+            bodyGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            var sidebar = new Border { Background = new SolidColorBrush(_isLightTheme ? L_Sidebar : Color.FromRgb(12, 8, 26)), BorderThickness = new Thickness(0, 0, 1, 0), BorderBrush = new SolidColorBrush(TBorder) };
+            var sidePanel = new StackPanel { Margin = new Thickness(0, 16, 0, 16) };
+            sidebar.Child = sidePanel;
+            var contentScroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Background = new SolidColorBrush(BgPanel), PanningMode = PanningMode.VerticalOnly };
+            var contentStack = new StackPanel { Margin = new Thickness(36, 30, 36, 36) };
+            contentScroll.Content = contentStack;
+            Grid.SetColumn(sidebar, 0); Grid.SetColumn(contentScroll, 1);
+            bodyGrid.Children.Add(sidebar); bodyGrid.Children.Add(contentScroll);
+            Grid.SetRow(bodyGrid, 1);
+
+            var navBtns = new List<Border>();
+            int activeIdx = 0;
+            Action<int> switchTab = null;
+            var footer = new Border { Background = new SolidColorBrush(_isLightTheme ? Color.FromRgb(235, 230, 255) : Color.FromRgb(10, 7, 22)), Padding = new Thickness(36, 14, 36, 14), BorderThickness = new Thickness(0, 1, 0, 0), BorderBrush = new SolidColorBrush(TBorder) };
+
+            var tabs = new (string Icon, string Label, Action<StackPanel> Builder)[]
+            {
+                ("⌨", T("TabCommands"),  p => BuildCommandsContent(p)),
+                ("⚡", T("TabTriggers"),  p => BuildTriggersContent(p)),
+                ("🔍", T("TabFilters"),   p => BuildFiltersContent(p)),
+                ("⚙", T("TabBehavior"),  p => BuildBehaviorContent(p)),
+                ("🔧", T("TabAdvanced"),  p => BuildAdvancedContent(p, window, header, footer, sidebar, contentScroll, navBtns, () => activeIdx)),
+                ("📋", T("TabHistory"),   p => BuildHistoryContent(p)),
+                ("❤️", T("TabAbout"),     p => BuildAboutContent(p)),
+            };
+
+            switchTab = idx =>
+            {
+                activeIdx = idx; contentStack.Children.Clear(); tabs[idx].Builder(contentStack);
+                for (int i = 0; i < navBtns.Count; i++)
+                {
+                    var b = navBtns[i]; var sp = (StackPanel)b.Child; var lbl = sp.Children.OfType<TextBlock>().Last();
+                    if (i == idx) { b.Background = new LinearGradientBrush(_isLightTheme ? Color.FromArgb(255, 180, 140, 255) : Color.FromArgb(255, 80, 30, 160), _isLightTheme ? Color.FromArgb(255, 160, 110, 240) : Color.FromArgb(255, 50, 15, 110), 0); b.BorderBrush = new SolidColorBrush(_isLightTheme ? Color.FromArgb(180, 140, 80, 220) : Color.FromArgb(180, 180, 100, 255)); lbl.Foreground = new SolidColorBrush(TextMain); }
+                    else { b.Background = Brushes.Transparent; b.BorderBrush = Brushes.Transparent; lbl.Foreground = new SolidColorBrush(TextMuted); }
+                }
+            };
+
+            for (int i = 0; i < tabs.Length; i++)
+            {
+                int idx = i;
+                var navBtn = new Border { Padding = new Thickness(16, 11, 16, 11), Margin = new Thickness(9, 2, 9, 2), CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1), BorderBrush = Brushes.Transparent, Background = Brushes.Transparent, Cursor = Cursors.Hand };
+                var navInner = new StackPanel { Orientation = Orientation.Horizontal };
+                navInner.Children.Add(new TextBlock { Text = tabs[i].Icon, FontSize = 14, Margin = new Thickness(0, 0, 9, 0), VerticalAlignment = VerticalAlignment.Center, Foreground = new SolidColorBrush(TextMuted) });
+                navInner.Children.Add(new TextBlock { Text = tabs[i].Label, FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Foreground = new SolidColorBrush(TextMuted) });
+                navBtn.Child = navInner;
+                navBtn.MouseEnter += (s, e) => { if (navBtns.IndexOf(navBtn) != activeIdx) navBtn.Background = new SolidColorBrush(_isLightTheme ? Color.FromArgb(50, 140, 80, 220) : Color.FromArgb(30, 160, 80, 255)); };
+                navBtn.MouseLeave += (s, e) => { if (navBtns.IndexOf(navBtn) != activeIdx) navBtn.Background = Brushes.Transparent; };
+                navBtn.MouseLeftButtonUp += (s, e) => switchTab(idx);
+                navBtns.Add(navBtn); sidePanel.Children.Add(navBtn);
+                if (i == 5) sidePanel.Children.Add(new Border { Height = 1, Margin = new Thickness(16, 10, 16, 10), Background = new SolidColorBrush(Color.FromArgb(25, 200, 150, 255)) });
+            }
+
+            var footerGrid = new Grid();
+            footerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            footerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var footerHint = new TextBlock { Text = "Зміни зберігаються при натисканні «Зберегти»", FontSize = 11, Foreground = new SolidColorBrush(TextMuted), VerticalAlignment = VerticalAlignment.Center };
+            var btnRow = new StackPanel { Orientation = Orientation.Horizontal };
+            var saveBtn = MakeFooterBtn("💾  Зберегти", C_Green);
+            var closeBtn = MakeFooterBtn("✕  Закрити", C_Red);
+            saveBtn.Click += (s, e) => { try { SaveElementsIn(contentStack); CPH.SendMessage("🇺🇦 BotBandera Fixer: налаштування збережено!"); } catch (Exception ex) { CPH.LogError("Помилка: " + ex.Message); } finally { window.Close(); } };
+            closeBtn.Click += (s, e) => window.Close();
+            btnRow.Children.Add(saveBtn); btnRow.Children.Add(closeBtn);
+            Grid.SetColumn(footerHint, 0); Grid.SetColumn(btnRow, 1);
+            footerGrid.Children.Add(footerHint); footerGrid.Children.Add(btnRow);
+            footer.Child = footerGrid; Grid.SetRow(footer, 2);
+
+            rootGrid.Children.Add(header); rootGrid.Children.Add(bodyGrid); rootGrid.Children.Add(footer);
+            window.Content = rootGrid;
+            switchTab(0);
+            if (_isLightTheme) ApplyTheme(window, contentStack, header, footer, sidebar, contentScroll, navBtns, activeIdx);
+            window.Closing += (s, e) => Dispatcher.CurrentDispatcher.InvokeShutdown();
+            window.Show(); Dispatcher.Run();
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.IsBackground = true;
+        thread.Start();
+    }
+
+    private Button MakeFooterBtn(string text, Color accent)
+    {
+        var btn = new Button { Content = text, Padding = new Thickness(22, 8, 22, 8), Margin = new Thickness(8, 0, 0, 0), Foreground = Brushes.White, FontSize = 13, FontWeight = FontWeights.SemiBold, BorderThickness = new Thickness(0), Background = new SolidColorBrush(accent), Cursor = Cursors.Hand };
+        btn.Effect = new DropShadowEffect { Color = accent, BlurRadius = 12, ShadowDepth = 0, Opacity = 0.5 };
+        var tpl = new ControlTemplate(typeof(Button)); var bf = new FrameworkElementFactory(typeof(Border));
+        bf.SetValue(Border.CornerRadiusProperty, new CornerRadius(7)); bf.SetValue(Border.BackgroundProperty, new TemplateBindingExtension(Button.BackgroundProperty)); bf.SetValue(Border.PaddingProperty, new TemplateBindingExtension(Button.PaddingProperty));
+        var cp = new FrameworkElementFactory(typeof(ContentPresenter)); cp.SetValue(ContentPresenter.HorizontalAlignmentProperty, HorizontalAlignment.Center); cp.SetValue(ContentPresenter.VerticalAlignmentProperty, VerticalAlignment.Center);
+        bf.AppendChild(cp); tpl.VisualTree = bf; btn.Template = tpl;
+        return btn;
+    }
+
+    private void AddSectionTitle(StackPanel p, string icon, string title, string sub = "")
+    {
+        var wrap = new StackPanel { Margin = new Thickness(0, 0, 0, 22) };
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 4) };
+        row.Children.Add(new TextBlock { Text = icon, FontSize = 22, Margin = new Thickness(0, 0, 10, 0), VerticalAlignment = VerticalAlignment.Center });
+        row.Children.Add(new TextBlock { Text = title, FontSize = 20, FontWeight = FontWeights.Bold, Foreground = new LinearGradientBrush(C_Accent1, C_Accent2, 0), VerticalAlignment = VerticalAlignment.Center });
+        wrap.Children.Add(row);
+        if (!string.IsNullOrEmpty(sub)) wrap.Children.Add(new TextBlock { Text = sub, FontSize = 11, Foreground = new SolidColorBrush(TextMuted), Margin = new Thickness(32, 0, 0, 0) });
+        wrap.Children.Add(new Border { Height = 1, Margin = new Thickness(0, 10, 0, 0), Background = new LinearGradientBrush(Color.FromArgb(100, 160, 70, 255), Color.FromArgb(0, 160, 70, 255), 0) });
+        p.Children.Add(wrap);
+    }
+
+    private void AddFieldLabel(StackPanel p, string text) => p.Children.Add(new TextBlock { Text = text, FontSize = 11, FontWeight = FontWeights.Bold, Foreground = new SolidColorBrush(TextMuted), Margin = new Thickness(0, 0, 0, 6) });
+    private void AddHintBox(StackPanel p, string text, bool isWarn = false) => p.Children.Add(new Border { Background = new SolidColorBrush(isWarn ? Color.FromArgb(25, 255, 80, 80) : Color.FromArgb(18, 80, 160, 255)), BorderBrush = new SolidColorBrush(isWarn ? Color.FromArgb(65, 255, 100, 100) : Color.FromArgb(50, 80, 160, 255)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(7), Padding = new Thickness(12, 9, 12, 9), Margin = new Thickness(0, 5, 0, 22), Child = new TextBlock { Text = text, FontSize = 12, Foreground = new SolidColorBrush(isWarn ? Color.FromArgb(200, 255, 160, 160) : Color.FromArgb(180, 160, 200, 255)), TextWrapping = TextWrapping.Wrap } });
+
+    private TextBox CreateStyledTextBox(string tag, int height = 80, bool multiline = false)
+    {
+        string val = CPH.GetGlobalVar<string>(tag, true) ?? "";
+        var tb = new TextBox { Tag = tag, Text = val, Height = height, Margin = new Thickness(0, 0, 0, 4), Padding = new Thickness(12, 9, 12, 9), Background = new SolidColorBrush(BgInput), Foreground = new SolidColorBrush(TextMain), CaretBrush = new SolidColorBrush(_isLightTheme ? C_Accent1 : C_Accent2), BorderBrush = new SolidColorBrush(Color.FromArgb(65, 140, 60, 220)), BorderThickness = new Thickness(2), FontSize = 13, FontFamily = new FontFamily("Consolas"), TextWrapping = multiline ? TextWrapping.Wrap : TextWrapping.NoWrap, AcceptsReturn = multiline, VerticalScrollBarVisibility = multiline ? ScrollBarVisibility.Auto : ScrollBarVisibility.Disabled, HorizontalAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Top };
+        tb.GotFocus += (s, e) => tb.BorderBrush = new SolidColorBrush(Color.FromArgb(200, 160, 80, 255));
+        tb.LostFocus += (s, e) => { tb.BorderBrush = new SolidColorBrush(Color.FromArgb(65, 140, 60, 220)); if (tb.Tag != null) CPH.SetGlobalVar(tb.Tag.ToString(), tb.Text ?? "", true); };
+        return tb;
+    }
+
+    private CheckBox CreateStyledCheckBox(string tag, string label) => new CheckBox { Tag = tag, Content = label, IsChecked = CPH.GetGlobalVar<bool>(tag, true), Foreground = new SolidColorBrush(TextMain), FontSize = 13, Margin = new Thickness(0, 6, 0, 6), Cursor = Cursors.Hand };
+
+    private UIElement MakeChip(string v, string d)
+    {
+        var chip = new Border { CornerRadius = new CornerRadius(5), Background = new SolidColorBrush(Color.FromArgb(35, 160, 80, 255)), BorderBrush = new SolidColorBrush(Color.FromArgb(70, 180, 100, 255)), BorderThickness = new Thickness(1), Padding = new Thickness(9, 4, 9, 4), Margin = new Thickness(0, 0, 7, 7) };
+        var inner = new StackPanel { Orientation = Orientation.Horizontal };
+        inner.Children.Add(new TextBlock { Text = v, FontSize = 12, FontFamily = new FontFamily("Consolas"), FontWeight = FontWeights.Bold, Foreground = new SolidColorBrush(C_Accent1), Margin = new Thickness(0, 0, 6, 0) });
+        inner.Children.Add(new TextBlock { Text = d, FontSize = 11, Foreground = new SolidColorBrush(TextMuted) });
+        chip.Child = inner; return chip;
+    }
+
+    private WrapPanel MakeChips(params (string v, string d)[] items) { var wp = new WrapPanel { Margin = new Thickness(0, 0, 0, 18) }; foreach (var (v, d) in items) wp.Children.Add(MakeChip(v, d)); return wp; }
+
+    private void UpdateEmoteChips(WrapPanel panel, IEnumerable<string> names)
+    {
+        panel.Children.Clear();
+        var list = names.OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList();
+        int shown = Math.Min(40, list.Count);
+        for (int i = 0; i < shown; i++)
+        {
+            var chip = new Border { CornerRadius = new CornerRadius(5), Background = new SolidColorBrush(Color.FromArgb(30, 70, 170, 255)), BorderBrush = new SolidColorBrush(Color.FromArgb(60, 70, 170, 255)), BorderThickness = new Thickness(1), Padding = new Thickness(8, 3, 8, 3), Margin = new Thickness(0, 0, 6, 6) };
+            chip.Child = new TextBlock { Text = list[i], FontSize = 11, FontFamily = new FontFamily("Consolas"), Foreground = new SolidColorBrush(TextMain) };
+            panel.Children.Add(chip);
+        }
+        if (list.Count > shown)
+        {
+            var more = new Border { CornerRadius = new CornerRadius(5), Background = new SolidColorBrush(Color.FromArgb(20, 200, 200, 200)), Padding = new Thickness(8, 3, 8, 3), Margin = new Thickness(0, 0, 6, 6) };
+            more.Child = new TextBlock { Text = $"+{list.Count - shown} ще", FontSize = 11, Foreground = new SolidColorBrush(TextMuted) };
+            panel.Children.Add(more);
+        }
+    }
+
+    private void BuildCommandsContent(StackPanel p)
+    {
+        AddSectionTitle(p, "⌨", "Команди виправлення", "Тригери чату — виправлення відбувається ТІЛЬКИ при їх активації");
+        AddFieldLabel(p, "КОМАНДИ (ЧЕРЕЗ КОМУ)");
+        p.Children.Add(CreateStyledTextBox("BotBanderaFixer_Triggers", 80, true));
+        AddHintBox(p, T("CommandsHint"));
+        AddHintBox(p, "ℹ️ Якщо після команди немає тексту (напр. просто «!бля») — бот шукає останнє зламане повідомлення користувача в історії (до 15 останніх реплік) і виправляє саме його.");
+        AddSectionTitle(p, "💬", "Повідомлення в чат");
+        AddFieldLabel(p, "ШАБЛОН ВІДПОВІДІ");
+        p.Children.Add(CreateStyledTextBox("BotBanderaFixer_ResponseTemplate", 80, true));
+        p.Children.Add(new TextBlock { Text = "Доступні плейсхолдери:", FontSize = 11, Foreground = new SolidColorBrush(TextMuted), Margin = new Thickness(0, 6, 0, 8) });
+        p.Children.Add(MakeChips(("{user}", "нікнейм"), ("{fixed}", "виправлений текст")));
+    }
+
+    private string BuildRemoteListsStatusText()
+    {
+        string Part(string endpoint, string label) => _remoteListCache.TryGetValue(endpoint, out var set)
+            ? $"{label}: {set.Count}"
+            : $"{label}: —";
+        string prefix = UseRemoteWordLists ? "✅ " : "⏸ (вимкнено) ";
+        return prefix + string.Join(" · ",
+            Part(RemoteTriggersFile, "слова"),
+            Part(RemoteSlangFile, "сленг"),
+            Part(RemoteProtectedWordsFile, "захищені"),
+            Part(RemoteEmotesFile, "емоути"));
+    }
+
+    private void BuildTriggersContent(StackPanel p)
+    {
+        AddSectionTitle(p, "☁️", "Автооновлення з репозиторію", "slova / sleng / zlamslowa / emout — підтягуються з GitHub автоматично (кеш 30 хв); кнопка «Оновити зараз» завжди тягне живі дані, без кешу");
+        var remoteCard = new Border { Background = new SolidColorBrush(BgCard), BorderBrush = new SolidColorBrush(TBorder), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(9), Padding = new Thickness(18, 14, 18, 14), Margin = new Thickness(0, 0, 0, 22) };
+        var remoteStack = new StackPanel();
+        remoteStack.Children.Add(CreateStyledCheckBox("BotBanderaFixer_UseRemoteWordLists", "Автоматично підтягувати слова, сленг, захищені слова й емоути з репозиторію"));
+        var remoteStatusRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 0) };
+        var remoteStatusText = new TextBlock { Text = BuildRemoteListsStatusText(), FontSize = 12, Foreground = new SolidColorBrush(TextMuted), VerticalAlignment = VerticalAlignment.Center };
+        var remoteRefreshBtn = MakeFooterBtn("🔄  Оновити зараз", C_Accent2);
+        remoteStatusRow.Children.Add(remoteStatusText);
+        remoteStatusRow.Children.Add(remoteRefreshBtn);
+        remoteStack.Children.Add(remoteStatusRow);
+        remoteRefreshBtn.Click += async (s, e) =>
+        {
+            remoteRefreshBtn.IsEnabled = false;
+            remoteStatusText.Text = "⏳ Тягну найсвіжіші дані з репозиторію (без кешу, паралельно)...";
+            try
+            {
+                
+                await Task.WhenAll(
+                    GetRemoteListAsync(RemoteTriggersFile, "Слова-тригери (репозиторій)", forceRefresh: true),
+                    GetRemoteListAsync(RemoteSlangFile, "Ігровий сленг (репозиторій)", forceRefresh: true),
+                    GetRemoteListAsync(RemoteProtectedWordsFile, "Захищені слова (репозиторій)", forceRefresh: true),
+                    GetRemoteListAsync(RemoteEmotesFile, "Емоути (репозиторій)", forceRefresh: true));
+                remoteStatusText.Text = BuildRemoteListsStatusText() + $" · оновлено {DateTime.Now:HH:mm:ss} · збережено в змінні";
+            }
+            catch (Exception ex) { remoteStatusText.Text = "❌ Помилка: " + ex.Message; }
+            finally { remoteRefreshBtn.IsEnabled = true; }
+        };
+        remoteCard.Child = remoteStack;
+        p.Children.Add(remoteCard);
+        AddHintBox(p, "💾 Після кожного оновлення (ручного чи фонового) списки автоматично зберігаються у global var Streamer.bot. Після перезапуску скрипта бот одразу користується останніми завантаженими даними (миттєво), а свіжу версію тягне у фоні — без затримки для тригера.");
+
+        AddSectionTitle(p, "⚡", "Слова-тригери", "100% виявлення зламу розкладки");
+        AddHintBox(p, T("TriggersHint"));
+        AddHintBox(p, "📡 Автоматично доповнюється списком з репозиторію: .../main/" + RemoteTriggersFile);
+        AddSectionTitle(p, "🎮", "Ігровий сленг", "Ці слова ігноруватимуться");
+        AddHintBox(p, T("SlangHint"));
+        AddHintBox(p, "📡 Автоматично доповнюється списком з репозиторію: .../main/" + RemoteSlangFile);
+        AddSectionTitle(p, "🛡", "Захищені слова", "Ці слова ніколи не змінюються і не тригерять виправлення");
+        AddHintBox(p, T("ProtectedWordsHint"));
+        AddHintBox(p, "📡 Автоматично доповнюється списком з репозиторію: .../main/" + RemoteProtectedWordsFile);
+    }
+
+    private void BuildFiltersContent(StackPanel p)
+    {
+        AddSectionTitle(p, "🔍", "Фільтри");
+        p.Children.Add(CreateStyledCheckBox("BotBanderaFixer_IgnoreRussianMessages", T("RussianIgnore")));
+        p.Children.Add(new Border { Height = 1, Margin = new Thickness(0, 18, 0, 18), Background = new SolidColorBrush(Color.FromArgb(20, 200, 150, 255)) });
+        p.Children.Add(CreateStyledCheckBox("BotBanderaFixer_IgnoreLatinWords", T("LatinIgnore")));
+
+        AddSectionTitle(p, "😀", T("TwitchEmotesTitle"), T("TwitchEmotesSub"));
+        var emoteCard = new Border { Background = new SolidColorBrush(BgCard), BorderBrush = new SolidColorBrush(TBorder), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(9), Padding = new Thickness(18, 14, 18, 14), Margin = new Thickness(0, 0, 0, 22) };
+        var emoteStack = new StackPanel();
+        emoteStack.Children.Add(CreateStyledCheckBox("BotBanderaFixer_UseTwitchEmotesApi", T("TwitchEmotesToggle")));
+        emoteStack.Children.Add(new TextBlock { Height = 14 });
+
+        AddFieldLabel(emoteStack, "ДОДАТКОВІ ЕМОУТИ ТА TWITCH SET ID (ЧЕРЕЗ КОМУ)");
+        emoteStack.Children.Add(CreateStyledTextBox("BotBanderaFixer_PreserveEmotesList", 100, true));
+        AddHintBox(emoteStack, T("PreserveHint"));
+        AddHintBox(emoteStack, "📡 Автоматично доповнюється списком з репозиторію: .../main/" + RemoteEmotesFile + " (керується перемикачем на вкладці «Тригери»)");
+        AddHintBox(emoteStack, "💾 Повний список емоутів (Twitch+BTTV+FFZ+7TV) теж автоматично зберігається у global var — після перезапуску скрипта доступний миттєво, без очікування ~10 мережевих запитів.");
+
+        var statusRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 10) };
+        var statusText = new TextBlock
+        {
+            Text = _emoteNamesCache != null
+                ? $"✅ Завантажено {_emoteNamesCache.Count} емоутів · {_emoteNamesLoadedAt.ToLocalTime():HH:mm}"
+                : "⏳ Ще не завантажено — натисни «Оновити зараз»",
+            FontSize = 12, Foreground = new SolidColorBrush(TextMuted), VerticalAlignment = VerticalAlignment.Center
+        };
+        var refreshBtn = MakeFooterBtn("🔄  Оновити зараз", C_Accent2);
+        statusRow.Children.Add(statusText);
+        statusRow.Children.Add(refreshBtn);
+        emoteStack.Children.Add(statusRow);
+
+        var chipsPanel = new WrapPanel { Margin = new Thickness(0, 0, 0, 2) };
+        if (_emoteNamesCache != null) UpdateEmoteChips(chipsPanel, _emoteNamesCache);
+        emoteStack.Children.Add(chipsPanel);
+
+        refreshBtn.Click += async (s, e) =>
+        {
+            refreshBtn.IsEnabled = false;
+            statusText.Text = "⏳ Оновлюю (Twitch + BTTV + FFZ + 7TV одночасно), без кешу...";
+            try
+            {
+                var names = await GetAllEmoteNamesAsync(forceRefresh: true);
+                statusText.Text = $"✅ Завантажено {names.Count} емоутів · {DateTime.Now:HH:mm:ss} · збережено в змінну";
+                UpdateEmoteChips(chipsPanel, names);
+            }
+            catch (Exception ex)
+            {
+                statusText.Text = "❌ Помилка: " + ex.Message;
+            }
+            finally { refreshBtn.IsEnabled = true; }
+        };
+
+        emoteCard.Child = emoteStack;
+        p.Children.Add(emoteCard);
+
+        AddSectionTitle(p, "🤖", "Боти");
+        AddFieldLabel(p, "ІМЕНА БОТІВ ДЛЯ ІГНОРУ (ЧЕРЕЗ КОМУ)");
+        p.Children.Add(CreateStyledTextBox("BotBanderaFixer_BotNamesToIgnore", 80, true));
+    }
+
+    private void BuildBehaviorContent(StackPanel p)
+    {
+        AddSectionTitle(p, "⚙", "Поведінка бота");
+        var card = new Border { Background = new SolidColorBrush(BgCard), BorderBrush = new SolidColorBrush(TBorder), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(9), Padding = new Thickness(18, 14, 18, 14), Margin = new Thickness(0, 0, 0, 22) };
+        var cardStack = new StackPanel();
+        cardStack.Children.Add(CreateStyledCheckBox("BotBanderaFixer_StopBots", T("StopBots")));
+        cardStack.Children.Add(CreateStyledCheckBox("BotBanderaFixer_RequireModForManager", T("RequireMod")));
+        cardStack.Children.Add(CreateStyledCheckBox("BotBanderaFixer_LogFixes", T("LogFixes")));
+        card.Child = cardStack; p.Children.Add(card);
+        AddSectionTitle(p, "😂", "Емодзі відповіді");
+        AddFieldLabel(p, "ЕМОДЗІ ПЕРЕД ПОВІДОМЛЕННЯМ");
+        p.Children.Add(CreateStyledTextBox("BotBanderaFixer_ResponseEmoji", 50, false));
+        AddHintBox(p, T("EmojiHint"));
+    }
+
+    private void BuildAdvancedContent(StackPanel p, Window window, Border header, Border footer, Border sidebar, ScrollViewer contentScroll, List<Border> navBtns, Func<int> getActiveIdx)
+    {
+        AddSectionTitle(p, "🖥", "Інтерфейс");
+        var themeCard = new Border { Background = new SolidColorBrush(BgCard), BorderBrush = new SolidColorBrush(TBorder), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(10), Padding = new Thickness(20, 16, 20, 16), Margin = new Thickness(0, 0, 0, 18) };
+        var themeInner = new StackPanel();
+        var themeTitle = new TextBlock { Text = _isLightTheme ? "☀️  Зараз активна: Світла тема" : "🌙  Зараз активна: Темна тема", FontSize = 14, FontWeight = FontWeights.Bold, Foreground = new SolidColorBrush(TextMain), Margin = new Thickness(0, 0, 0, 10) };
+        var themeSub = new TextBlock { Text = "Натисни кнопку нижче щоб перемкнути тему без перезапуску", FontSize = 11, Foreground = new SolidColorBrush(TextMuted), Margin = new Thickness(0, 0, 0, 14), TextWrapping = TextWrapping.Wrap };
+        var themeBtn = new Button { Content = _isLightTheme ? "🌙  Перемкнути на Темну тему" : "☀️  Перемкнути на Світлу тему", Padding = new Thickness(20, 10, 20, 10), Foreground = Brushes.White, FontSize = 13, FontWeight = FontWeights.SemiBold, BorderThickness = new Thickness(0), Background = _isLightTheme ? new SolidColorBrush(Color.FromRgb(80, 40, 160)) : new SolidColorBrush(Color.FromRgb(160, 120, 40)), Cursor = Cursors.Hand, HorizontalAlignment = HorizontalAlignment.Left };
+        themeBtn.Effect = new DropShadowEffect { Color = C_Accent1, BlurRadius = 10, ShadowDepth = 0, Opacity = 0.4 };
+        var tpl2 = new ControlTemplate(typeof(Button)); var bf2 = new FrameworkElementFactory(typeof(Border));
+        bf2.SetValue(Border.CornerRadiusProperty, new CornerRadius(8)); bf2.SetValue(Border.BackgroundProperty, new TemplateBindingExtension(Button.BackgroundProperty)); bf2.SetValue(Border.PaddingProperty, new TemplateBindingExtension(Button.PaddingProperty));
+        var cp2 = new FrameworkElementFactory(typeof(ContentPresenter)); cp2.SetValue(ContentPresenter.HorizontalAlignmentProperty, HorizontalAlignment.Center); cp2.SetValue(ContentPresenter.VerticalAlignmentProperty, VerticalAlignment.Center);
+        bf2.AppendChild(cp2); tpl2.VisualTree = bf2; themeBtn.Template = tpl2;
+        themeBtn.Click += (s, e) => { _isLightTheme = !_isLightTheme; CPH.SetGlobalVar("BotBanderaFixer_UseLightTheme", _isLightTheme, true); themeTitle.Text = _isLightTheme ? "☀️  Зараз активна: Світла тема" : "🌙  Зараз активна: Темна тема"; themeBtn.Content = _isLightTheme ? "🌙  Перемкнути на Темну тему" : "☀️  Перемкнути на Світлу тему"; themeBtn.Background = _isLightTheme ? new SolidColorBrush(Color.FromRgb(80, 40, 160)) : new SolidColorBrush(Color.FromRgb(160, 120, 40)); ApplyTheme(window, contentScroll.Content as StackPanel, header, footer, sidebar, contentScroll, navBtns, getActiveIdx()); };
+        themeInner.Children.Add(themeTitle); themeInner.Children.Add(themeSub); themeInner.Children.Add(themeBtn);
+        themeCard.Child = themeInner; p.Children.Add(themeCard);
+    }
+
+    private void BuildHistoryContent(StackPanel p)
+    {
+        AddSectionTitle(p, "📋", "Історія зламаних фраз");
+        var card = new Border { Background = new SolidColorBrush(BgCard), BorderBrush = new SolidColorBrush(TBorder), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(9), Padding = new Thickness(18, 14, 18, 14), Margin = new Thickness(0, 0, 0, 22) };
+        var cardStack = new StackPanel();
+        cardStack.Children.Add(CreateStyledCheckBox("BotBanderaFixer_SaveHistory", T("SaveHistory")));
+        cardStack.Children.Add(new TextBlock { Height = 8 });
+        cardStack.Children.Add(new TextBlock { Text = T("MaxHistoryLabel").ToUpperInvariant(), FontSize = 10, FontWeight = FontWeights.Bold, Foreground = new SolidColorBrush(TextMuted), Margin = new Thickness(0, 0, 0, 5) });
+        cardStack.Children.Add(CreateStyledTextBox("BotBanderaFixer_MaxHistory", 50, false));
+        card.Child = cardStack; p.Children.Add(card);
+        AddSectionTitle(p, "📁", "Шлях до файлу");
+        AddFieldLabel(p, T("CustomHistoryPath").ToUpperInvariant());
+        p.Children.Add(CreateStyledTextBox("BotBanderaFixer_CustomHistoryPath", 50, false));
+        AddHintBox(p, T("CustomHistoryHint"));
+        p.Children.Add(new Border { Background = new SolidColorBrush(Color.FromArgb(20, 80, 160, 80)), BorderBrush = new SolidColorBrush(Color.FromArgb(50, 80, 200, 80)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(7), Padding = new Thickness(12, 9, 12, 9), Margin = new Thickness(0, 8, 0, 0), Child = new TextBlock { Text = "📂  Поточний шлях: " + GetHistoryPath(), FontSize = 12, FontFamily = new FontFamily("Consolas"), Foreground = new SolidColorBrush(Color.FromArgb(180, 160, 220, 160)), TextWrapping = TextWrapping.Wrap } });
+    }
+
+    private void BuildAboutContent(StackPanel p)
+    {
+        AddSectionTitle(p, "❤️", "Про скрипт");
+        var card = new Border { Background = new LinearGradientBrush(Color.FromArgb(40, 160, 70, 255), Color.FromArgb(20, 70, 170, 255), 90), BorderBrush = new SolidColorBrush(Color.FromArgb(55, 180, 100, 255)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(12), Padding = new Thickness(32, 28, 32, 28), Margin = new Thickness(0, 0, 0, 28) };
+        var inner = new StackPanel();
+        inner.Children.Add(new TextBlock { Text = T("AboutTitle"), FontSize = 20, FontWeight = FontWeights.Bold, Foreground = new LinearGradientBrush(Color.FromRgb(255, 180, 255), Color.FromRgb(180, 220, 255), 45), TextAlignment = TextAlignment.Center, Margin = new Thickness(0, 0, 0, 16) });
+        inner.Children.Add(new TextBlock { Text = T("AboutText"), FontSize = 14, Foreground = new SolidColorBrush(Color.FromArgb(210, 220, 210, 255)), TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center, Margin = new Thickness(0, 0, 0, 28) });
+        foreach (var (icon, label, url) in new[] { ("🔴", "Twitch — sun69wukong", "https://www.twitch.tv/sun69wukong"), ("💳", "Monobank (донат)", "https://send.monobank.ua/jar/9Bqrs6GN1V"), ("🎁", "Donatello", "https://donatello.to/sun69wukong") })
+        {
+            var linkBorder = new Border { Background = new SolidColorBrush(Color.FromArgb(28, 255, 255, 255)), BorderBrush = new SolidColorBrush(Color.FromArgb(35, 255, 255, 255)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(9), Padding = new Thickness(18, 11, 18, 11), Margin = new Thickness(0, 0, 0, 9), Cursor = Cursors.Hand };
+            var linkRow = new StackPanel { Orientation = Orientation.Horizontal };
+            linkRow.Children.Add(new TextBlock { Text = icon, FontSize = 16, Margin = new Thickness(0, 0, 10, 0), VerticalAlignment = VerticalAlignment.Center });
+            var hyperlink = new Hyperlink(new Run(label)) { NavigateUri = new Uri(url), Foreground = new SolidColorBrush(Color.FromRgb(130, 200, 255)) };
+            hyperlink.RequestNavigate += (s, e) => Process.Start(new ProcessStartInfo(e.Uri.AbsoluteUri) { UseShellExecute = true });
+            hyperlink.MouseEnter += (s, e) => { hyperlink.Foreground = Brushes.Cyan; hyperlink.TextDecorations = TextDecorations.Underline; };
+            hyperlink.MouseLeave += (s, e) => { hyperlink.Foreground = new SolidColorBrush(Color.FromRgb(130, 200, 255)); hyperlink.TextDecorations = null; };
+            var linkTb = new TextBlock { FontSize = 14, VerticalAlignment = VerticalAlignment.Center };
+            linkTb.Inlines.Add(hyperlink); linkRow.Children.Add(linkTb); linkBorder.Child = linkRow;
+            linkBorder.MouseEnter += (s, e) => linkBorder.Background = new SolidColorBrush(Color.FromArgb(45, 255, 255, 255));
+            linkBorder.MouseLeave += (s, e) => linkBorder.Background = new SolidColorBrush(Color.FromArgb(28, 255, 255, 255));
+            inner.Children.Add(linkBorder);
+        }
+        card.Child = inner; p.Children.Add(card);
+    }
+
+    private void SaveElementsIn(DependencyObject parent)
+    {
+        foreach (var child in LogicalTreeHelper.GetChildren(parent))
+        {
+            if (child is TextBox tb && tb.Tag != null) CPH.SetGlobalVar(tb.Tag.ToString(), tb.Text ?? "", true);
+            else if (child is CheckBox cb && cb.Tag != null) CPH.SetGlobalVar(cb.Tag.ToString(), cb.IsChecked == true, true);
+            else if (child is DependencyObject dep) SaveElementsIn(dep);
+        }
+    }
+}

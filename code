@@ -21,7 +21,7 @@ using System.Windows.Input;
 public class CPHInline
 {
  
-    private const int CurrentVersion = 2;
+    private const int CurrentVersion = 4;
 
     private const string RemoteVersionFile = "version";
     private static int? _remoteVersionCache = null;

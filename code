@@ -21,7 +21,10 @@ using System.Windows.Input;
 public class CPHInline
 {
     // ==================== ВЕРСІЯ СКРИПТА ====================
-    private const int CurrentVersion = 3;
+    // Підвищуй це число щоразу, коли вносиш зміни в код і оновлюєш файл
+    // .../main/code у репозиторії. Бот сам порівнює це число з файлом
+    // .../main/version у репозиторії і попереджає, якщо там новіша версія.
+    private const int CurrentVersion = 1;
 
     private const string RemoteVersionFile = "version";
     private static int? _remoteVersionCache = null;
@@ -146,6 +149,7 @@ public class CPHInline
     private const string RemoteProtectedWordsFile = "zlamslowa";
     private const string RemoteSlangFile = "sleng";
     private const string RemoteEmotesFile = "emout";
+    private const string RemoteCodeFile = "code";
     private const int RemoteListCacheMinutes = 30;
 
     private static readonly HttpClient RemoteListsClient = new(new HttpClientHandler
@@ -353,6 +357,38 @@ public class CPHInline
         else if (LogFixes)
         {
             CPH.LogInfo($"[BotBandera] ✅ Версія коду актуальна (v{CurrentVersion}, у репозиторії v{remoteVersion.Value})");
+        }
+    }
+
+    // ==================== ЗАВАНТАЖЕННЯ АКТУАЛЬНОГО КОДУ З РЕПОЗИТОРІЮ ====================
+    // Тягне сирий текст .../main/code. САМ скрипт не може перекомпілювати себе під час
+    // виконання (Streamer.bot компілює C# лише один раз, при натисканні Compile/Save у
+    // редакторі дії) — тому результат лише копіюється в буфер обміну, а застосовує його
+    // людина: Ctrl+V у редакторі C# дії в Streamer.bot → Compile/Save.
+    private async Task<string> FetchRemoteCodeAsync(bool bustCache = true)
+    {
+        try
+        {
+            string url = bustCache ? RemoteCodeFile + "?_cb=" + DateTime.UtcNow.Ticks : RemoteCodeFile;
+            using var cts = new CancellationTokenSource(20000);
+            using var reqMsg = new HttpRequestMessage(HttpMethod.Get, url);
+            if (bustCache)
+                reqMsg.Headers.CacheControl = new System.Net.Http.Headers.CacheControlHeaderValue { NoCache = true, NoStore = true, MustRevalidate = true };
+
+            var resp = await RemoteListsClient.SendAsync(reqMsg, cts.Token);
+            if (!resp.IsSuccessStatusCode)
+            {
+                if (LogFixes) CPH.LogWarn($"[BotBandera] ⚠️ Завантаження коду: HTTP {(int)resp.StatusCode}");
+                return null;
+            }
+
+            string content = await resp.Content.ReadAsStringAsync();
+            return string.IsNullOrWhiteSpace(content) ? null : content;
+        }
+        catch (Exception ex)
+        {
+            if (LogFixes) CPH.LogWarn($"[BotBandera] ⚠️ Завантаження коду: {ex.Message}");
+            return null;
         }
     }
 
@@ -1363,15 +1399,17 @@ public class CPHInline
         p.Children.Add(remoteCard);
         AddHintBox(p, "💾 Після кожного оновлення (ручного чи фонового) списки автоматично зберігаються у global var Streamer.bot. Після перезапуску скрипта бот одразу користується останніми завантаженими даними (миттєво), а свіжу версію тягне у фоні — без затримки для тригера.");
 
-        // ── Блок перевірки версії коду ──
+        // ── Блок перевірки версії коду + реальне оновлення (копіювання в буфер обміну) ──
         AddSectionTitle(p, "🧬", "Версія коду", "Порівнює версію, зашиту в цьому файлі, з файлом .../main/version у репозиторії");
         var versionCard = new Border { Background = new SolidColorBrush(BgCard), BorderBrush = new SolidColorBrush(TBorder), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(9), Padding = new Thickness(18, 14, 18, 14), Margin = new Thickness(0, 0, 0, 22) };
         var versionStack = new StackPanel();
+
+        bool initialUpdateAvailable = _remoteVersionCache.HasValue && _remoteVersionCache.Value > CurrentVersion;
         var versionStatusText = new TextBlock
         {
             Text = _remoteVersionCache.HasValue
-                ? (_remoteVersionCache.Value > CurrentVersion
-                    ? $"⚠️ У репозиторії новіша версія: v{_remoteVersionCache.Value} (тут v{CurrentVersion}) — онови код вручну"
+                ? (initialUpdateAvailable
+                    ? $"⚠️ У репозиторії новіша версія: v{_remoteVersionCache.Value} (тут v{CurrentVersion}) — можна оновити"
                     : $"✅ Версія актуальна: v{CurrentVersion} (репозиторій: v{_remoteVersionCache.Value})")
                 : $"ℹ️ Поточна версія в цьому файлі: v{CurrentVersion}. Натисни «Перевірити», щоб звірити з репозиторієм.",
             FontSize = 12,
@@ -1381,9 +1419,13 @@ public class CPHInline
         };
         var versionCheckRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 0) };
         var versionCheckBtn = MakeFooterBtn("🔍  Перевірити версію", C_Accent2);
+        var versionUpdateBtn = MakeFooterBtn("⬇️  Оновити (скопіювати код)", C_Green);
+        versionUpdateBtn.Visibility = initialUpdateAvailable ? Visibility.Visible : Visibility.Collapsed;
         versionCheckRow.Children.Add(versionCheckBtn);
+        versionCheckRow.Children.Add(versionUpdateBtn);
         versionStack.Children.Add(versionStatusText);
         versionStack.Children.Add(versionCheckRow);
+
         versionCheckBtn.Click += async (s, e) =>
         {
             versionCheckBtn.IsEnabled = false;
@@ -1394,26 +1436,78 @@ public class CPHInline
                 if (!remoteVersion.HasValue)
                 {
                     versionStatusText.Text = "❌ Не вдалося прочитати файл .../main/version у репозиторії";
+                    versionUpdateBtn.Visibility = Visibility.Collapsed;
                 }
                 else if (remoteVersion.Value > CurrentVersion)
                 {
-                    versionStatusText.Text = $"⚠️ У репозиторії новіша версія: v{remoteVersion.Value} (тут v{CurrentVersion}). Онови код у Streamer.bot вручну — сам скрипт себе не перекомпільовує.";
+                    versionStatusText.Text = $"⚠️ У репозиторії новіша версія: v{remoteVersion.Value} (тут v{CurrentVersion}). Натисни «Оновити», щоб скопіювати новий код у буфер обміну.";
+                    versionUpdateBtn.Visibility = Visibility.Visible;
                 }
                 else if (remoteVersion.Value < CurrentVersion)
                 {
                     versionStatusText.Text = $"ℹ️ У Streamer.bot версія новіша за репозиторій: v{CurrentVersion} (репозиторій: v{remoteVersion.Value}). Не забудь підняти число у файлі version після наступного оновлення коду.";
+                    versionUpdateBtn.Visibility = Visibility.Collapsed;
                 }
                 else
                 {
                     versionStatusText.Text = $"✅ Версія актуальна: v{CurrentVersion}, збігається з репозиторієм.";
+                    versionUpdateBtn.Visibility = Visibility.Collapsed;
                 }
             }
             catch (Exception ex) { versionStatusText.Text = "❌ Помилка: " + ex.Message; }
             finally { versionCheckBtn.IsEnabled = true; }
         };
+
+        versionUpdateBtn.Click += async (s, e) =>
+        {
+            var confirm = MessageBox.Show(
+                "Зараз буде завантажено актуальний код із .../main/code і скопійовано в буфер обміну " +
+                "(поточний вміст буфера обміну буде замінено).\n\n" +
+                "Сам скрипт не може перекомпілювати себе під час роботи — Streamer.bot компілює C# лише " +
+                "один раз, при натисканні Compile/Save у редакторі дії. Тому після копіювання потрібно вручну:\n" +
+                "1) Відкрити цю дію в Streamer.bot → вкладку з C# кодом\n" +
+                "2) Виділити весь код (Ctrl+A) і вставити новий (Ctrl+V)\n" +
+                "3) Натиснути Compile/Save\n\n" +
+                "Продовжити?",
+                "Оновлення коду BotBandera",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question);
+
+            if (confirm != MessageBoxResult.Yes) return;
+
+            versionUpdateBtn.IsEnabled = false;
+            versionCheckBtn.IsEnabled = false;
+            versionStatusText.Text = "⏳ Завантажую актуальний код із репозиторію...";
+            try
+            {
+                string code = await FetchRemoteCodeAsync(bustCache: true);
+                if (string.IsNullOrWhiteSpace(code))
+                {
+                    versionStatusText.Text = "❌ Не вдалося завантажити код із репозиторію (.../main/code порожній або недоступний)";
+                    MessageBox.Show("Не вдалося завантажити код із репозиторію. Перевір з'єднання та посилання .../main/code.", "Помилка", MessageBoxButton.OK, MessageBoxImage.Error);
+                    return;
+                }
+
+                Clipboard.SetText(code);
+                versionStatusText.Text = $"✅ Код скопійовано в буфер обміну ({code.Length} символів, {DateTime.Now:HH:mm:ss}). Встав його (Ctrl+V) в редакторі C# дії в Streamer.bot і натисни Compile/Save.";
+                MessageBox.Show(
+                    $"Код успішно скопійовано в буфер обміну ({code.Length} символів).\n\n" +
+                    "Далі:\n1) Перейди в Streamer.bot → дія з цим C# кодом\n2) Ctrl+A → Ctrl+V в редакторі коду\n3) Натисни Compile/Save\n\n" +
+                    "Після цього перезапусти цю дію/тригер, щоб нова версія почала працювати.",
+                    "Готово", MessageBoxButton.OK, MessageBoxImage.Information);
+                versionUpdateBtn.Visibility = Visibility.Collapsed;
+            }
+            catch (Exception ex)
+            {
+                versionStatusText.Text = "❌ Помилка: " + ex.Message;
+                MessageBox.Show("Помилка під час оновлення: " + ex.Message, "Помилка", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally { versionUpdateBtn.IsEnabled = true; versionCheckBtn.IsEnabled = true; }
+        };
+
         versionCard.Child = versionStack;
         p.Children.Add(versionCard);
-        AddHintBox(p, "ℹ️ Це лише попередження — сам код не оновлюється автоматично (Streamer.bot компілює C# один раз при збереженні дії, і скрипт не може переписати сам себе). Щоб оновити: онови .../main/code, підвищ число у .../main/version, потім вручну встав новий код у редактор C# в Streamer.bot і натисни Compile/Save.", true);
+        AddHintBox(p, "ℹ️ Кнопка «Оновити» лише копіює свіжий код у буфер обміну — сам код не оновлюється автоматично (Streamer.bot компілює C# один раз при збереженні дії, і скрипт не може переписати сам себе). Вставку (Ctrl+V) і Compile/Save завжди робиш вручну.", true);
 
         AddSectionTitle(p, "⚡", "Слова-тригери", "100% виявлення зламу розкладки");
         AddHintBox(p, T("TriggersHint"));
@@ -1523,7 +1617,7 @@ public class CPHInline
         var verCard = new Border { Background = new SolidColorBrush(BgCard), BorderBrush = new SolidColorBrush(TBorder), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(10), Padding = new Thickness(20, 16, 20, 16), Margin = new Thickness(0, 0, 0, 18) };
         var verInner = new StackPanel();
         verInner.Children.Add(new TextBlock { Text = $"Версія коду в Streamer.bot: v{CurrentVersion}", FontSize = 14, FontWeight = FontWeights.Bold, Foreground = new SolidColorBrush(TextMain), Margin = new Thickness(0, 0, 0, 6) });
-        verInner.Children.Add(new TextBlock { Text = "Перевірку та кнопку оновлення дивись на вкладці «Тригери» → «Версія коду».", FontSize = 11, Foreground = new SolidColorBrush(TextMuted), TextWrapping = TextWrapping.Wrap });
+        verInner.Children.Add(new TextBlock { Text = "Перевірку, статус і кнопку «Оновити» дивись на вкладці «Тригери» → «Версія коду».", FontSize = 11, Foreground = new SolidColorBrush(TextMuted), TextWrapping = TextWrapping.Wrap });
         verCard.Child = verInner; p.Children.Add(verCard);
     }
 

@@ -20,11 +20,8 @@ using System.Windows.Input;
 
 public class CPHInline
 {
-    // ==================== ВЕРСІЯ СКРИПТА ====================
-    // Підвищуй це число щоразу, коли вносиш зміни в код і оновлюєш файл
-    // .../main/code у репозиторії. Бот сам порівнює це число з файлом
-    // .../main/version у репозиторії і попереджає, якщо там новіша версія.
-    private const int CurrentVersion = 1;
+ 
+    private const int CurrentVersion = 2;
 
     private const string RemoteVersionFile = "version";
     private static int? _remoteVersionCache = null;
@@ -284,11 +281,6 @@ public class CPHInline
         catch { return null; }
     }
 
-    // ==================== ПЕРЕВІРКА ВЕРСІЇ КОДУ В РЕПОЗИТОРІЇ ====================
-    // Порівнює CurrentVersion (зашито в цьому файлі) з числом у файлі
-    // .../main/version у репозиторії. Якщо там більше — це означає, що ти
-    // оновив .../main/code, але ще не вставив нову версію в Streamer.bot.
-    // Не змінює і не перекомпільовує сам код (C# так не вміє) — лише попереджає.
 
     private async Task<int?> FetchRemoteVersionAsync(bool bustCache = false)
     {
@@ -1131,7 +1123,7 @@ public class CPHInline
         }
     }
 
-    // ==================== GUI ====================
+    // ==================== ГУЇ ====================
 
     private void ApplyTheme(Window window, StackPanel contentStack, Border header, Border footer, Border sidebar, ScrollViewer contentScroll, List<Border> navBtns, int activeIdx)
     {

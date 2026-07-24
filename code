@@ -20,7 +20,7 @@ using System.Windows.Input;
 
 public class CPHInline
 {
-    private const int CurrentVersion = 8;
+    private const int CurrentVersion = 9;
     private const string RemoteVersionFile = "version";
     private static int? _remoteVersionCache = null;
     private static DateTime _remoteVersionCheckedAt = DateTime.MinValue;
@@ -489,6 +489,57 @@ public class CPHInline
     private static readonly SemaphoreSlim _emoteLock = new SemaphoreSlim(1, 1);
     private static readonly Regex EmoteNameJsonRegex = new Regex(@"""name""\s*:\s*""((?:[^""\\]|\\.)*)""", RegexOptions.Compiled);
     private static readonly Regex EmoteCodeJsonRegex = new Regex(@"""code""\s*:\s*""((?:[^""\\]|\\.)*)""", RegexOptions.Compiled);
+    // ── Streamer.bot v1.0.5: "Defer loading of Twitch Emotes to speed up overall
+    // Twitch Broadcaster login". Тепер CPH.TwitchOAuthToken/TwitchClientId можуть
+    // на кілька секунд лишатися порожніми одразу після конекту бродкастера, поки
+    // Streamer.bot сам ще не підвантажив свою внутрішню сесію Twitch. Це не
+    // помилка користувача і не привід одразу писати варнінг в лог — тому додано
+    // невеликий retry-прогрів із backoff замість одноразової спроби.
+    private const int TwitchTokenWarmupMaxAttempts = 5;
+    private static readonly TimeSpan[] TwitchTokenWarmupDelays =
+    {
+        TimeSpan.FromMilliseconds(500),
+        TimeSpan.FromSeconds(1),
+        TimeSpan.FromSeconds(2),
+        TimeSpan.FromSeconds(3),
+        TimeSpan.FromSeconds(5)
+    };
+    private static DateTime? _twitchTokenFirstSeenAt = null;
+    private async Task<(string Token, string ClientId)> WaitForTwitchCredentialsAsync(bool forceRefresh)
+    {
+        string token = CPH.TwitchOAuthToken;
+        string clientId = CPH.TwitchClientId;
+        if (!string.IsNullOrWhiteSpace(token) && !string.IsNullOrWhiteSpace(clientId))
+        {
+            _twitchTokenFirstSeenAt ??= DateTime.UtcNow;
+            return (token, clientId);
+        }
+
+        // Прогрів потрібен лише коли реально форсуємо оновлення (кнопка/старт емоутів),
+        // а не для кожного дрібного виклику — щоб не додавати штучну затримку без потреби.
+        if (!forceRefresh)
+            return (token, clientId);
+        if (LogFixes)
+            CPH.LogInfo("[BotBandera] " + T("TwitchDeferredWarming"));
+        for (int attempt = 0; attempt < TwitchTokenWarmupMaxAttempts; attempt++)
+        {
+            await Task.Delay(TwitchTokenWarmupDelays[Math.Min(attempt, TwitchTokenWarmupDelays.Length - 1)]);
+            token = CPH.TwitchOAuthToken;
+            clientId = CPH.TwitchClientId;
+            if (!string.IsNullOrWhiteSpace(token) && !string.IsNullOrWhiteSpace(clientId))
+            {
+                _twitchTokenFirstSeenAt ??= DateTime.UtcNow;
+                if (LogFixes)
+                    CPH.LogInfo($"[BotBandera] ✅ Twitch OAuth токен готовий (спроба {attempt + 1}/{TwitchTokenWarmupMaxAttempts})");
+                return (token, clientId);
+            }
+        }
+
+        if (LogFixes)
+            CPH.LogWarn("[BotBandera] " + T("TwitchDeferredNoTokenYet"));
+        return (token, clientId);
+    }
+
     private async Task<HashSet<string>> GetAllEmoteNamesAsync(bool forceRefresh = false)
     {
         if (!forceRefresh && _emoteNamesCache != null && (DateTime.UtcNow - _emoteNamesLoadedAt).TotalHours < EmoteCacheHours)
@@ -573,8 +624,11 @@ public class CPHInline
             }
 
             var tasks = new List<Task>();
-            string token = CPH.TwitchOAuthToken;
-            string clientId = CPH.TwitchClientId;
+            // Streamer.bot 1.0.5+ відкладає завантаження Twitch-емоутів на своєму боці
+            // ("Defer loading of Twitch Emotes to speed up overall Twitch Broadcaster
+            // login"), тож токен/ClientId можуть з'явитися із затримкою. При примусовому
+            // оновленні (forceRefresh) чекаємо на них замість одразової відмови.
+            var (token, clientId) = await WaitForTwitchCredentialsAsync(forceRefresh);
             if (!string.IsNullOrWhiteSpace(token) && !string.IsNullOrWhiteSpace(clientId))
             {
                 tasks.Add(FetchAsync(TwitchHelixClient, "emotes/global", "Twitch глобальні", EmoteNameJsonRegex, token, clientId));
@@ -589,7 +643,7 @@ public class CPHInline
                 }
             }
             else if (LogFixes)
-                CPH.LogWarn("[BotBandera] ⚠️ Немає Twitch OAuth токена — Twitch Helix емоути пропущено");
+                CPH.LogWarn("[BotBandera] ⚠️ Немає Twitch OAuth токена — Twitch Helix емоути пропущено (" + T("TwitchDeferredNoTokenYet") + ")");
             tasks.Add(FetchAsync(BttvClient, "cached/emotes/global", "BTTV глобальні", EmoteCodeJsonRegex));
             if (!string.IsNullOrWhiteSpace(broadcasterId))
                 tasks.Add(FetchAsync(BttvClient, $"cached/users/twitch/{broadcasterId}", "BTTV канальні", EmoteCodeJsonRegex));
@@ -2230,6 +2284,22 @@ public class CPHInline
         AddHintBox(emoteStack, T("PreserveHint"));
         AddHintBox(emoteStack, "📡 Автоматично доповнюється списком з репозиторію: .../main/" + RemoteEmotesFile + " (керується перемикачем на вкладці «Тригери»)");
         AddHintBox(emoteStack, "💾 Повний список емоутів (Twitch+BTTV+FFZ+7TV) теж автоматично зберігається у global var — після перезапуску скрипта доступний миттєво, без очікування ~10 мережевих запитів.");
+
+        // ── Streamer.bot v1.0.5: "Defer loading of Twitch Emotes to speed up
+        // overall Twitch Broadcaster login" — на боці самого Streamer.bot Twitch
+        // OAuth-сесія бродкастера тепер підвантажується з невеликою затримкою.
+        // Показуємо стримеру, чи готовий токен просто зараз, щоб не плутати
+        // "емоутів 0" з реальною помилкою підключення.
+        bool twitchTokenReadyNow = !string.IsNullOrWhiteSpace(CPH.TwitchOAuthToken) && !string.IsNullOrWhiteSpace(CPH.TwitchClientId);
+        var deferredStatusText = new TextBlock
+        {
+            Text = twitchTokenReadyNow ? "✅ Twitch OAuth токен бродкастера готовий — Helix-емоути можуть завантажуватись" : "⏳ Twitch OAuth токен бродкастера ще не готовий (Streamer.bot 1.0.5+ відкладає його завантаження при вході — це нормально одразу після старту)",
+            FontSize = 11,
+            Foreground = new SolidColorBrush(twitchTokenReadyNow ? Color.FromArgb(190, 150, 220, 160) : Color.FromArgb(190, 220, 190, 150)),
+            Margin = new Thickness(0, 0, 0, 8),
+            TextWrapping = TextWrapping.Wrap
+        };
+        emoteStack.Children.Add(deferredStatusText);
         var statusRow = new StackPanel
         {
             Orientation = Orientation.Horizontal,
@@ -2257,10 +2327,14 @@ public class CPHInline
         {
             refreshBtn.IsEnabled = false;
             statusText.Text = "⏳ Оновлюю (Twitch + BTTV + FFZ + 7TV одночасно), без кешу...";
+            deferredStatusText.Text = "⏳ Перевіряю готовність Twitch OAuth токена бродкастера (Streamer.bot 1.0.5+ може ще прогріватись після входу)...";
             try
             {
                 var names = await GetAllEmoteNamesAsync(forceRefresh: true);
                 statusText.Text = $"✅ Завантажено {names.Count} емоутів · {DateTime.Now:HH:mm:ss} · збережено в змінну";
+                bool tokenReadyAfter = !string.IsNullOrWhiteSpace(CPH.TwitchOAuthToken) && !string.IsNullOrWhiteSpace(CPH.TwitchClientId);
+                deferredStatusText.Text = tokenReadyAfter ? "✅ Twitch OAuth токен бродкастера готовий — Helix-емоути можуть завантажуватись" : "⚠️ Токен усе ще не готовий після прогріву — перевір, чи Twitch Broadcaster залогінений у Streamer.bot";
+                deferredStatusText.Foreground = new SolidColorBrush(tokenReadyAfter ? Color.FromArgb(190, 150, 220, 160) : Color.FromArgb(200, 240, 180, 140));
                 UpdateEmoteChips(chipsPanel, names);
             }
             catch (Exception ex)
@@ -2391,6 +2465,21 @@ public class CPHInline
         verInner.Children.Add(new TextBlock { Text = "Перевірку, статус і кнопку «Оновити» дивись на вкладці «Тригери» → «Версія коду».", FontSize = 11, Foreground = new SolidColorBrush(TextMuted), TextWrapping = TextWrapping.Wrap });
         verCard.Child = verInner;
         p.Children.Add(verCard);
+        AddSectionTitle(p, "🧩", "Сумісність зі Streamer.bot", "Врахований changelog v1.0.5");
+        var compatCard = new Border
+        {
+            Background = new SolidColorBrush(BgCard),
+            BorderBrush = new SolidColorBrush(TBorder),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(10),
+            Padding = new Thickness(20, 16, 20, 16),
+            Margin = new Thickness(0, 0, 0, 18)
+        };
+        var compatInner = new StackPanel();
+        compatInner.Children.Add(new TextBlock { Text = "Streamer.bot v1.0.5: «Defer loading of Twitch Emotes to speed up overall Twitch Broadcaster login»", FontSize = 13, FontWeight = FontWeights.Bold, Foreground = new SolidColorBrush(TextMain), Margin = new Thickness(0, 0, 0, 8), TextWrapping = TextWrapping.Wrap });
+        compatInner.Children.Add(new TextBlock { Text = "Це стосується внутрішнього завантаження Twitch-емоутів у самому Streamer.bot (не наших Helix/BTTV/FFZ/7TV запитів), але через це OAuth-токен бродкастера тепер може з'являтись із затримкою в кілька секунд одразу після конекту.\n\nЩо змінено в скрипті через це:\n• Додано «прогрів» токена (до 5 спроб із паузами 0.5–5с) перед примусовим оновленням списку емоутів — замість миттєвої відмови.\n• На вкладці «Фільтри та емоти» додано окремий індикатор готовності Twitch OAuth токена бродкастера.\n• Це не впливає на команди чату («!fix» тощо) — вони, як і раніше, читають ті самі args[\"rawInput\"]/args[\"user\"], які Streamer.bot підставляє незалежно від того, чи чат іде через IRC чи через EventSub.", FontSize = 12, Foreground = new SolidColorBrush(TextMuted), TextWrapping = TextWrapping.Wrap });
+        compatCard.Child = compatInner;
+        p.Children.Add(compatCard);
     }
 
     private void BuildHistoryContent(StackPanel p)

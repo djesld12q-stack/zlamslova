@@ -20,7 +20,7 @@ using System.Windows.Input;
 
 public class CPHInline
 {
-    private const int CurrentVersion = 6;
+    private const int CurrentVersion = 8;
     private const string RemoteVersionFile = "version";
     private static int? _remoteVersionCache = null;
     private static DateTime _remoteVersionCheckedAt = DateTime.MinValue;
@@ -57,6 +57,8 @@ public class CPHInline
         ["TwitchEmotesSub"] = "Twitch Helix + BTTV + FFZ + 7TV — глобальні й канальні емоути з усіх платформ захищаються автоматично",
         ["TwitchEmotesToggle"] = "Автоматично захищати будь-які емоути (Twitch, BTTV, FFZ, 7TV)",
         ["NoBrokenFound"] = "🤷 {user}, не знайшов зламаного повідомлення в історії останніх реплік.",
+        ["TwitchDeferredWarming"] = "⏳ Streamer.bot 1.0.5+ відкладає завантаження Twitch-логіну (Defer loading of Twitch Emotes) — токен ще прогрівається, спробую ще раз автоматично.",
+        ["TwitchDeferredNoTokenYet"] = "ℹ️ OAuth-токен Twitch Broadcaster ще не готовий (Streamer.bot 1.0.5+ відкладає його завантаження при вході). Це нормально одразу після старту — токен зазвичай з'являється протягом кількох секунд.",
     };
     private string T(string key) => Texts.TryGetValue(key, out var text) ? text : key;
     private static readonly Dictionary<char, char> EnToUk = new()
@@ -656,6 +658,57 @@ public class CPHInline
     }
 
     private static bool IsAllUkrainianCyrillic(string s) => s.Length > 0 && s.All(IsUkrainianCyrillic);
+
+    // ── Евристика розпізнавання нікнеймів/емоутів (не природних слів) ──
+    // Такі токени не повинні вважатись "зламаною розкладкою", навіть якщо
+    // вони випадково не потрапили у protected-список емоутів (наприклад
+    // ще не підвантажились через Twitch/BTTV/FFZ/7TV API).
+    //
+    // ВАЖЛИВО: raw-текст — це англійські клавіші фізичної розкладки, а не
+    // англійські слова. Тому "голосна"/"приголосна" тут визначається за тим,
+    // яку УКРАЇНСЬКУ літеру дає клавіша через таблицю EnToUk (e,t,s,f,j,z,b,
+    // а також ',",.,],},> — усі вони дають українські голосні: у,е,і,а,о,я,
+    // и,є,є,ю,ї,ї,ю). Англійські голосні aeiou тут НЕ підходять: наприклад
+    // "a" дає приголосну "ф", а "s" дає голосну "і".
+    private static bool IsUkrainianVowelKey(char c)
+    {
+        char low = char.ToLowerInvariant(c);
+        return low == 'e' || low == 't' || low == 's' || low == 'f' || low == 'j' || low == 'z' || low == 'b' || c == '\'' || c == '"' || c == '.' || c == ']' || c == '}' || c == '>';
+    }
+
+    private static bool LooksLikeEmoteOrHandle(string word)
+    {
+        if (string.IsNullOrEmpty(word) || word.Length < 3)
+            return false;
+        // camelCase / PascalCase всередині слова (KEKW, PepeHands, sun69Wukong) —
+        // типова структура нікнейму чи емоуту, а не звичайного розмовного слова
+        for (int i = 1; i < word.Length; i++)
+            if (char.IsUpper(word[i]) && char.IsLower(word[i - 1]))
+                return true;
+        // цифри в середині/кінці слова — майже завжди нік чи ID (sun69wukong, gg2ez)
+        if (word.Any(char.IsDigit))
+            return true;
+        // 5+ клавіш підряд, що НЕ дають українську голосну після конвертації —
+        // для природного українського слова (де голосні — це майже половина
+        // літер) такий кластер практично неможливий; дефіс не рахуємо і не
+        // перериває серію, бо ConvertEnToUk його не чіпає
+        int consecConsonants = 0, maxConsec = 0;
+        foreach (char c in word)
+        {
+            if (c == '-')
+                continue;
+            if (!IsUkrainianVowelKey(c))
+            {
+                consecConsonants++;
+                maxConsec = Math.Max(maxConsec, consecConsonants);
+            }
+            else
+                consecConsonants = 0;
+        }
+
+        return maxConsec >= 5;
+    }
+
     private bool IsWordBroken(string converted, HashSet<string> dict, HashSet<string> ultraTriggers)
     {
         if (string.IsNullOrEmpty(converted) || converted.Length < 2)
@@ -723,7 +776,7 @@ public class CPHInline
         var allMatches = WordRegex.Matches(text).Cast<Match>().Where(m => !preserveRegex.IsMatch(m.Value)).Select(m => m.Value).Where(w => w.Length >= 1).ToList();
         if (allMatches.Count == 0)
             return (false, text);
-        var latinWords = allMatches.Where(w => IsLatinOnly(w)).Select(w => w.ToLowerInvariant()).Where(w => !gamerSlang.Contains(w)).ToList();
+        var latinWords = allMatches.Where(w => IsLatinOnly(w)).Where(w => !LooksLikeEmoteOrHandle(w)).Select(w => w.ToLowerInvariant()).Where(w => !gamerSlang.Contains(w)).ToList();
         var cyrillicWords = allMatches.Where(w => !IsLatinOnly(w)).Select(w => w.ToLowerInvariant()).Where(w => !gamerSlang.Contains(w)).ToList();
         if (latinWords.Count == 0)
             return (false, text);

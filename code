@@ -2465,21 +2465,8 @@ public class CPHInline
         verInner.Children.Add(new TextBlock { Text = "Перевірку, статус і кнопку «Оновити» дивись на вкладці «Тригери» → «Версія коду».", FontSize = 11, Foreground = new SolidColorBrush(TextMuted), TextWrapping = TextWrapping.Wrap });
         verCard.Child = verInner;
         p.Children.Add(verCard);
-        AddSectionTitle(p, "🧩", "Сумісність зі Streamer.bot", "Врахований changelog v1.0.5");
-        var compatCard = new Border
-        {
-            Background = new SolidColorBrush(BgCard),
-            BorderBrush = new SolidColorBrush(TBorder),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(10),
-            Padding = new Thickness(20, 16, 20, 16),
-            Margin = new Thickness(0, 0, 0, 18)
-        };
-        var compatInner = new StackPanel();
-        compatInner.Children.Add(new TextBlock { Text = "Streamer.bot v1.0.5: «Defer loading of Twitch Emotes to speed up overall Twitch Broadcaster login»", FontSize = 13, FontWeight = FontWeights.Bold, Foreground = new SolidColorBrush(TextMain), Margin = new Thickness(0, 0, 0, 8), TextWrapping = TextWrapping.Wrap });
-        compatInner.Children.Add(new TextBlock { Text = "Це стосується внутрішнього завантаження Twitch-емоутів у самому Streamer.bot (не наших Helix/BTTV/FFZ/7TV запитів), але через це OAuth-токен бродкастера тепер може з'являтись із затримкою в кілька секунд одразу після конекту.\n\nЩо змінено в скрипті через це:\n• Додано «прогрів» токена (до 5 спроб із паузами 0.5–5с) перед примусовим оновленням списку емоутів — замість миттєвої відмови.\n• На вкладці «Фільтри та емоти» додано окремий індикатор готовності Twitch OAuth токена бродкастера.\n• Це не впливає на команди чату («!fix» тощо) — вони, як і раніше, читають ті самі args[\"rawInput\"]/args[\"user\"], які Streamer.bot підставляє незалежно від того, чи чат іде через IRC чи через EventSub.", FontSize = 12, Foreground = new SolidColorBrush(TextMuted), TextWrapping = TextWrapping.Wrap });
-        compatCard.Child = compatInner;
-        p.Children.Add(compatCard);
+        
+       
     }
 
     private void BuildHistoryContent(StackPanel p)

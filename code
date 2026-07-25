@@ -20,7 +20,7 @@ using System.Windows.Input;
 
 public class CPHInline
 {
-    private const int CurrentVersion = 9;
+    private const int CurrentVersion = 10;
     private const string RemoteVersionFile = "version";
     private static int? _remoteVersionCache = null;
     private static DateTime _remoteVersionCheckedAt = DateTime.MinValue;
@@ -377,6 +377,36 @@ public class CPHInline
         return _remoteVersionCache;
     }
 
+   private void ShowDesktopToast(string title, string message)
+{
+    try
+    {
+        var notifyIcon = new System.Windows.Forms.NotifyIcon
+        {
+            Icon = System.Drawing.SystemIcons.Information,
+            Visible = true,
+            BalloonTipTitle = title,
+            BalloonTipText = message,
+            BalloonTipIcon = System.Windows.Forms.ToolTipIcon.Warning
+        };
+        notifyIcon.ShowBalloonTip(8000);
+        var timer = new System.Windows.Forms.Timer { Interval = 9000 };
+        timer.Tick += (s, e) =>
+        {
+            notifyIcon.Visible = false;
+            notifyIcon.Dispose();
+            timer.Stop();
+            timer.Dispose();
+        };
+        timer.Start();
+    }
+    catch (Exception ex)
+    {
+        if (LogFixes)
+            CPH.LogWarn($"[BotBandera] ⚠️ Не вдалося показати toast: {ex.Message}");
+    }
+}
+
     private async Task CheckForNewerVersionAsync(bool announceInChat = false)
     {
         var remoteVersion = await GetRemoteVersionAsync();
@@ -386,10 +416,12 @@ public class CPHInline
         {
             string warning = $"[BotBandera] ⚠️ У репозиторії доступна новіша версія коду: v{remoteVersion.Value} (у Streamer.bot зараз v{CurrentVersion}). " + $"Онови файл .../main/code вручну в редакторі C# (Streamer.bot сам код не перекомпільовує).";
             CPH.LogWarn(warning);
-            if (announceInChat && !_versionWarningShownThisSession)
+            if (!_versionWarningShownThisSession)
             {
                 _versionWarningShownThisSession = true;
-                CPH.SendMessage($"🔧 BotBandera: у репозиторії є новіша версія коду (v{remoteVersion.Value} проти v{CurrentVersion} зараз). Потрібно вручну оновити код у Streamer.bot.");
+                ShowDesktopToast("BotBandera Fixer — доступне оновлення", $"Нова версія коду: v{remoteVersion.Value} (зараз v{CurrentVersion}). Відкрий вкладку «Тригери» → «Версія коду», щоб оновити.");
+                if (announceInChat)
+                    CPH.SendMessage($"🔧 BotBandera: у репозиторії є новіша версія коду (v{remoteVersion.Value} проти v{CurrentVersion} зараз). Потрібно вручну оновити код у Streamer.bot.");
             }
         }
         else if (LogFixes)
@@ -628,7 +660,7 @@ public class CPHInline
             // ("Defer loading of Twitch Emotes to speed up overall Twitch Broadcaster
             // login"), тож токен/ClientId можуть з'явитися із затримкою. При примусовому
             // оновленні (forceRefresh) чекаємо на них замість одразової відмови.
-            var (token, clientId) = await WaitForTwitchCredentialsAsync(forceRefresh);
+            var(token, clientId) = await WaitForTwitchCredentialsAsync(forceRefresh);
             if (!string.IsNullOrWhiteSpace(token) && !string.IsNullOrWhiteSpace(clientId))
             {
                 tasks.Add(FetchAsync(TwitchHelixClient, "emotes/global", "Twitch глобальні", EmoteNameJsonRegex, token, clientId));
@@ -712,7 +744,6 @@ public class CPHInline
     }
 
     private static bool IsAllUkrainianCyrillic(string s) => s.Length > 0 && s.All(IsUkrainianCyrillic);
-
     // ── Евристика розпізнавання нікнеймів/емоутів (не природних слів) ──
     // Такі токени не повинні вважатись "зламаною розкладкою", навіть якщо
     // вони випадково не потрапили у protected-список емоутів (наприклад
@@ -2284,7 +2315,6 @@ public class CPHInline
         AddHintBox(emoteStack, T("PreserveHint"));
         AddHintBox(emoteStack, "📡 Автоматично доповнюється списком з репозиторію: .../main/" + RemoteEmotesFile + " (керується перемикачем на вкладці «Тригери»)");
         AddHintBox(emoteStack, "💾 Повний список емоутів (Twitch+BTTV+FFZ+7TV) теж автоматично зберігається у global var — після перезапуску скрипта доступний миттєво, без очікування ~10 мережевих запитів.");
-
         // ── Streamer.bot v1.0.5: "Defer loading of Twitch Emotes to speed up
         // overall Twitch Broadcaster login" — на боці самого Streamer.bot Twitch
         // OAuth-сесія бродкастера тепер підвантажується з невеликою затримкою.
@@ -2465,8 +2495,6 @@ public class CPHInline
         verInner.Children.Add(new TextBlock { Text = "Перевірку, статус і кнопку «Оновити» дивись на вкладці «Тригери» → «Версія коду».", FontSize = 11, Foreground = new SolidColorBrush(TextMuted), TextWrapping = TextWrapping.Wrap });
         verCard.Child = verInner;
         p.Children.Add(verCard);
-        
-       
     }
 
     private void BuildHistoryContent(StackPanel p)

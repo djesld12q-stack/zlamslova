@@ -20,12 +20,40 @@ using System.Windows.Input;
 
 public class CPHInline
 {
-    private const int CurrentVersion = 9;
+    private const string CurrentVersion = "1.0.1";
     private const string RemoteVersionFile = "version";
-    private static int? _remoteVersionCache = null;
+    private static string _remoteVersionCache = null;
     private static DateTime _remoteVersionCheckedAt = DateTime.MinValue;
     private const int VersionCheckCacheMinutes = 30;
     private static bool _versionWarningShownThisSession = false;
+    private static readonly Regex SemVerRegex = new Regex(@"^\d+(\.\d+){0,2}$", RegexOptions.Compiled);
+
+    private static int[] ParseVersion(string v)
+    {
+        if (string.IsNullOrWhiteSpace(v))
+            return new[] { 0, 0, 0 };
+        var parts = v.Trim().Split('.');
+        var result = new int[3];
+        for (int i = 0; i < 3; i++)
+            result[i] = i < parts.Length && int.TryParse(parts[i], out int n) ? n : 0;
+        return result;
+    }
+
+    // Порівнює дві версії у форматі X.Y.Z (або X, X.Y — відсутні частини трактуються як 0).
+    // Повертає <0 якщо a < b, 0 якщо рівні, >0 якщо a > b.
+    private static int CompareVersions(string a, string b)
+    {
+        var pa = ParseVersion(a);
+        var pb = ParseVersion(b);
+        for (int i = 0; i < 3; i++)
+        {
+            int cmp = pa[i].CompareTo(pb[i]);
+            if (cmp != 0)
+                return cmp;
+        }
+        return 0;
+    }
+
     private static readonly Dictionary<string, string> Texts = new()
     {
         ["WindowTitle"] = "BotBandera — Налаштування Fixer",
@@ -326,7 +354,7 @@ public class CPHInline
         }
     }
 
-    private async Task<int?> FetchRemoteVersionAsync(bool bustCache = false)
+    private async Task<string> FetchRemoteVersionAsync(bool bustCache = false)
     {
         try
         {
@@ -349,10 +377,10 @@ public class CPHInline
             }
 
             string content = (await resp.Content.ReadAsStringAsync()).Trim();
-            if (int.TryParse(content, out int remoteVersion))
-                return remoteVersion;
+            if (SemVerRegex.IsMatch(content))
+                return content;
             if (LogFixes)
-                CPH.LogWarn($"[BotBandera] ⚠️ Перевірка версії: некоректний вміст файлу version ('{content}')");
+                CPH.LogWarn($"[BotBandera] ⚠️ Перевірка версії: некоректний вміст файлу version ('{content}'), очікується формат X.Y.Z");
             return null;
         }
         catch (Exception ex)
@@ -363,12 +391,12 @@ public class CPHInline
         }
     }
 
-    private async Task<int?> GetRemoteVersionAsync(bool forceRefresh = false)
+    private async Task<string> GetRemoteVersionAsync(bool forceRefresh = false)
     {
-        if (!forceRefresh && _remoteVersionCache.HasValue && (DateTime.UtcNow - _remoteVersionCheckedAt).TotalMinutes < VersionCheckCacheMinutes)
+        if (!forceRefresh && _remoteVersionCache != null && (DateTime.UtcNow - _remoteVersionCheckedAt).TotalMinutes < VersionCheckCacheMinutes)
             return _remoteVersionCache;
         var fetched = await FetchRemoteVersionAsync(forceRefresh);
-        if (fetched.HasValue)
+        if (fetched != null)
         {
             _remoteVersionCache = fetched;
             _remoteVersionCheckedAt = DateTime.UtcNow;
@@ -380,21 +408,21 @@ public class CPHInline
     private async Task CheckForNewerVersionAsync(bool announceInChat = false)
     {
         var remoteVersion = await GetRemoteVersionAsync();
-        if (!remoteVersion.HasValue)
+        if (remoteVersion == null)
             return;
-        if (remoteVersion.Value > CurrentVersion)
+        if (CompareVersions(remoteVersion, CurrentVersion) > 0)
         {
-            string warning = $"[BotBandera] ⚠️ У репозиторії доступна новіша версія коду: v{remoteVersion.Value} (у Streamer.bot зараз v{CurrentVersion}). " + $"Онови файл .../main/code вручну в редакторі C# (Streamer.bot сам код не перекомпільовує).";
+            string warning = $"[BotBandera] ⚠️ У репозиторії доступна новіша версія коду: v{remoteVersion} (у Streamer.bot зараз v{CurrentVersion}). " + $"Онови файл .../main/code вручну в редакторі C# (Streamer.bot сам код не перекомпільовує).";
             CPH.LogWarn(warning);
             if (announceInChat && !_versionWarningShownThisSession)
             {
                 _versionWarningShownThisSession = true;
-                CPH.SendMessage($"🔧 BotBandera: у репозиторії є новіша версія коду (v{remoteVersion.Value} проти v{CurrentVersion} зараз). Потрібно вручну оновити код у Streamer.bot.");
+                CPH.SendMessage($"🔧 BotBandera: у репозиторії є новіша версія коду (v{remoteVersion} проти v{CurrentVersion} зараз). Потрібно вручну оновити код у Streamer.bot.");
             }
         }
         else if (LogFixes)
         {
-            CPH.LogInfo($"[BotBandera] ✅ Версія коду актуальна (v{CurrentVersion}, у репозиторії v{remoteVersion.Value})");
+            CPH.LogInfo($"[BotBandera] ✅ Версія коду актуальна (v{CurrentVersion}, у репозиторії v{remoteVersion})");
         }
     }
 
@@ -2143,7 +2171,7 @@ public class CPHInline
         p.Children.Add(remoteCard);
         AddHintBox(p, "💾 Після кожного оновлення (ручного чи фонового) списки автоматично зберігаються у global var Streamer.bot. Після перезапуску скрипта бот одразу користується останніми завантаженими даними (миттєво), а свіжу версію тягне у фоні — без затримки для тригера.");
         // ── Блок перевірки версії коду + реальне оновлення (копіювання в буфер обміну) ──
-        AddSectionTitle(p, "🧬", "Версія коду", "Порівнює версію, зашиту в цьому файлі, з файлом .../main/version у репозиторії");
+        AddSectionTitle(p, "🧬", "Версія коду", "Порівнює версію, зашиту в цьому файлі, з файлом .../main/version у репозиторії (формат X.Y.Z)");
         var versionCard = new Border
         {
             Background = new SolidColorBrush(BgCard),
@@ -2154,10 +2182,10 @@ public class CPHInline
             Margin = new Thickness(0, 0, 0, 22)
         };
         var versionStack = new StackPanel();
-        bool initialUpdateAvailable = _remoteVersionCache.HasValue && _remoteVersionCache.Value > CurrentVersion;
+        bool initialUpdateAvailable = _remoteVersionCache != null && CompareVersions(_remoteVersionCache, CurrentVersion) > 0;
         var versionStatusText = new TextBlock
         {
-            Text = _remoteVersionCache.HasValue ? (initialUpdateAvailable ? $"⚠️ У репозиторії новіша версія: v{_remoteVersionCache.Value} (тут v{CurrentVersion}) — можна оновити" : $"✅ Версія актуальна: v{CurrentVersion} (репозиторій: v{_remoteVersionCache.Value})") : $"ℹ️ Поточна версія в цьому файлі: v{CurrentVersion}. Натисни «Перевірити», щоб звірити з репозиторієм.",
+            Text = _remoteVersionCache != null ? (initialUpdateAvailable ? $"⚠️ У репозиторії новіша версія: v{_remoteVersionCache} (тут v{CurrentVersion}) — можна оновити" : $"✅ Версія актуальна: v{CurrentVersion} (репозиторій: v{_remoteVersionCache})") : $"ℹ️ Поточна версія в цьому файлі: v{CurrentVersion}. Натисни «Перевірити», щоб звірити з репозиторієм.",
             FontSize = 12,
             Foreground = new SolidColorBrush(TextMuted),
             VerticalAlignment = VerticalAlignment.Center,
@@ -2182,25 +2210,29 @@ public class CPHInline
             try
             {
                 var remoteVersion = await GetRemoteVersionAsync(forceRefresh: true);
-                if (!remoteVersion.HasValue)
+                if (remoteVersion == null)
                 {
-                    versionStatusText.Text = "❌ Не вдалося прочитати файл .../main/version у репозиторії";
-                    versionUpdateBtn.Visibility = Visibility.Collapsed;
-                }
-                else if (remoteVersion.Value > CurrentVersion)
-                {
-                    versionStatusText.Text = $"⚠️ У репозиторії новіша версія: v{remoteVersion.Value} (тут v{CurrentVersion}). Натисни «Оновити», щоб скопіювати новий код у буфер обміну.";
-                    versionUpdateBtn.Visibility = Visibility.Visible;
-                }
-                else if (remoteVersion.Value < CurrentVersion)
-                {
-                    versionStatusText.Text = $"ℹ️ У Streamer.bot версія новіша за репозиторій: v{CurrentVersion} (репозиторій: v{remoteVersion.Value}). Не забудь підняти число у файлі version після наступного оновлення коду.";
+                    versionStatusText.Text = "❌ Не вдалося прочитати файл .../main/version у репозиторії (очікується формат X.Y.Z)";
                     versionUpdateBtn.Visibility = Visibility.Collapsed;
                 }
                 else
                 {
-                    versionStatusText.Text = $"✅ Версія актуальна: v{CurrentVersion}, збігається з репозиторієм.";
-                    versionUpdateBtn.Visibility = Visibility.Collapsed;
+                    int cmp = CompareVersions(remoteVersion, CurrentVersion);
+                    if (cmp > 0)
+                    {
+                        versionStatusText.Text = $"⚠️ У репозиторії новіша версія: v{remoteVersion} (тут v{CurrentVersion}). Натисни «Оновити», щоб скопіювати новий код у буфер обміну.";
+                        versionUpdateBtn.Visibility = Visibility.Visible;
+                    }
+                    else if (cmp < 0)
+                    {
+                        versionStatusText.Text = $"ℹ️ У Streamer.bot версія новіша за репозиторій: v{CurrentVersion} (репозиторій: v{remoteVersion}). Не забудь підняти номер у файлі version після наступного оновлення коду.";
+                        versionUpdateBtn.Visibility = Visibility.Collapsed;
+                    }
+                    else
+                    {
+                        versionStatusText.Text = $"✅ Версія актуальна: v{CurrentVersion}, збігається з репозиторієм.";
+                        versionUpdateBtn.Visibility = Visibility.Collapsed;
+                    }
                 }
             }
             catch (Exception ex)

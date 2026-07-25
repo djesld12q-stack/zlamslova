@@ -20,7 +20,7 @@ using System.Windows.Input;
 
 public class CPHInline
 {
-    private const int CurrentVersion = 10;
+    private const int CurrentVersion = 11;
     private const string RemoteVersionFile = "version";
     private static int? _remoteVersionCache = null;
     private static DateTime _remoteVersionCheckedAt = DateTime.MinValue;

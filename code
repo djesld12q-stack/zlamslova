@@ -20,7 +20,7 @@ using System.Windows.Input;
 
 public class CPHInline
 {
-    private const string CurrentVersion = "1.0.1";
+    private const string CurrentVersion = "1.0.2";
     private const string RemoteVersionFile = "version";
     private static string _remoteVersionCache = null;
     private static DateTime _remoteVersionCheckedAt = DateTime.MinValue;
@@ -39,8 +39,7 @@ public class CPHInline
         return result;
     }
 
-    // Порівнює дві версії у форматі X.Y.Z (або X, X.Y — відсутні частини трактуються як 0).
-    // Повертає <0 якщо a < b, 0 якщо рівні, >0 якщо a > b.
+
     private static int CompareVersions(string a, string b)
     {
         var pa = ParseVersion(a);
@@ -517,12 +516,7 @@ public class CPHInline
     private static readonly SemaphoreSlim _emoteLock = new SemaphoreSlim(1, 1);
     private static readonly Regex EmoteNameJsonRegex = new Regex(@"""name""\s*:\s*""((?:[^""\\]|\\.)*)""", RegexOptions.Compiled);
     private static readonly Regex EmoteCodeJsonRegex = new Regex(@"""code""\s*:\s*""((?:[^""\\]|\\.)*)""", RegexOptions.Compiled);
-    // ── Streamer.bot v1.0.5: "Defer loading of Twitch Emotes to speed up overall
-    // Twitch Broadcaster login". Тепер CPH.TwitchOAuthToken/TwitchClientId можуть
-    // на кілька секунд лишатися порожніми одразу після конекту бродкастера, поки
-    // Streamer.bot сам ще не підвантажив свою внутрішню сесію Twitch. Це не
-    // помилка користувача і не привід одразу писати варнінг в лог — тому додано
-    // невеликий retry-прогрів із backoff замість одноразової спроби.
+  
     private const int TwitchTokenWarmupMaxAttempts = 5;
     private static readonly TimeSpan[] TwitchTokenWarmupDelays =
     {
@@ -543,8 +537,7 @@ public class CPHInline
             return (token, clientId);
         }
 
-        // Прогрів потрібен лише коли реально форсуємо оновлення (кнопка/старт емоутів),
-        // а не для кожного дрібного виклику — щоб не додавати штучну затримку без потреби.
+       
         if (!forceRefresh)
             return (token, clientId);
         if (LogFixes)
@@ -652,10 +645,7 @@ public class CPHInline
             }
 
             var tasks = new List<Task>();
-            // Streamer.bot 1.0.5+ відкладає завантаження Twitch-емоутів на своєму боці
-            // ("Defer loading of Twitch Emotes to speed up overall Twitch Broadcaster
-            // login"), тож токен/ClientId можуть з'явитися із затримкою. При примусовому
-            // оновленні (forceRefresh) чекаємо на них замість одразової відмови.
+          
             var (token, clientId) = await WaitForTwitchCredentialsAsync(forceRefresh);
             if (!string.IsNullOrWhiteSpace(token) && !string.IsNullOrWhiteSpace(clientId))
             {
@@ -741,17 +731,7 @@ public class CPHInline
 
     private static bool IsAllUkrainianCyrillic(string s) => s.Length > 0 && s.All(IsUkrainianCyrillic);
 
-    // ── Евристика розпізнавання нікнеймів/емоутів (не природних слів) ──
-    // Такі токени не повинні вважатись "зламаною розкладкою", навіть якщо
-    // вони випадково не потрапили у protected-список емоутів (наприклад
-    // ще не підвантажились через Twitch/BTTV/FFZ/7TV API).
-    //
-    // ВАЖЛИВО: raw-текст — це англійські клавіші фізичної розкладки, а не
-    // англійські слова. Тому "голосна"/"приголосна" тут визначається за тим,
-    // яку УКРАЇНСЬКУ літеру дає клавіша через таблицю EnToUk (e,t,s,f,j,z,b,
-    // а також ',",.,],},> — усі вони дають українські голосні: у,е,і,а,о,я,
-    // и,є,є,ю,ї,ї,ю). Англійські голосні aeiou тут НЕ підходять: наприклад
-    // "a" дає приголосну "ф", а "s" дає голосну "і".
+
     private static bool IsUkrainianVowelKey(char c)
     {
         char low = char.ToLowerInvariant(c);
@@ -762,18 +742,14 @@ public class CPHInline
     {
         if (string.IsNullOrEmpty(word) || word.Length < 3)
             return false;
-        // camelCase / PascalCase всередині слова (KEKW, PepeHands, sun69Wukong) —
-        // типова структура нікнейму чи емоуту, а не звичайного розмовного слова
+       
         for (int i = 1; i < word.Length; i++)
             if (char.IsUpper(word[i]) && char.IsLower(word[i - 1]))
                 return true;
-        // цифри в середині/кінці слова — майже завжди нік чи ID (sun69wukong, gg2ez)
+        
         if (word.Any(char.IsDigit))
             return true;
-        // 5+ клавіш підряд, що НЕ дають українську голосну після конвертації —
-        // для природного українського слова (де голосні — це майже половина
-        // літер) такий кластер практично неможливий; дефіс не рахуємо і не
-        // перериває серію, бо ConvertEnToUk його не чіпає
+       
         int consecConsonants = 0, maxConsec = 0;
         foreach (char c in word)
         {
@@ -899,7 +875,7 @@ public class CPHInline
         }
         else if (latinWords.Count == totalWords)
         {
-            // Всі латинські: достатньо 1 fuzzy збігу
+         
             isBroken = ukrConverted >= 1;
         }
         else
@@ -1300,7 +1276,7 @@ public class CPHInline
         CPH.SetGlobalVar("BotBanderaFixer_Initialized", true, true);
     }
 
-    // Regex для розбиття тексту на слова — вшито в код, більше не редагується через GUI.
+    
     private const string WordRegexPattern = @"\b[a-zA-Zа-яА-ЯіїІЇєиЄґҐ'.\-]+\b";
     private static readonly Regex WordRegex = new Regex(WordRegexPattern, RegexOptions.Compiled);
     private string Triggers => CPH.GetGlobalVar<string>("BotBanderaFixer_Triggers", true) ?? "";
